@@ -127,6 +127,7 @@ Right-clicking a chat in the left panel opens a small menu with **Rename...**, *
 | `/wow-ai cd <folder>` | folder this chat's agent works in (**Folder...** after right-clicking the chat opens the same thing as a dialog). Relative to the bridge's folder (`/wow-ai cd realms`, `/wow-ai cd ../other`), `~` works, a full path too; `/wow-ai cd` alone goes back to the bridge's default. A chat that changes folder starts a fresh session there |
 | `/wow-ai reset` | wipe this chat's agent memory, keep the transcript |
 | `/wow-ai context [on\|off]` | show what the agent is told about your character and location, or turn it on/off |
+| `/wow-ai feed [on\|off\|hold <s>\|shows <n>]` | the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status) |
 | `/wow-ai rename`, `/wow-ai delete`, `/wow-ai clear` | manage the current chat |
 | `/wow-ai echo summary\|full\|short\|off\|<chars>` | how much of each reply to print into the game chat. `summary` (the default) prints only the agent's closing TL;DR lines, the full reply is in the window behind `[open]`; `full` prints up to 4000 chars, `short` one preview line |
 | `/wow-ai longchat on` | let the game chat box take 4000 characters, for long `/ai` messages |
@@ -147,6 +148,8 @@ Every run tells the agent that only a short summary of its reply is printed in t
 ### The agent knows where you are
 
 The addon tells the agent which game and client you are on, your character (name, realm, level, race, class, faction, guild), where you are (zone, subzone and the map coordinates the minimap shows), your money, talents, professions with their skill, and your quest log (quest ids, marking the ones ready to turn in). A few lines, sent with the addon's hello and again whenever they change, and put into the agent's system prompt by the bridge (Claude and Grok take a system prompt; for Codex the bridge puts it at the top of the message, marked as context), so you can ask "what should I be doing at my level around here?" or "write me a macro for my class" without explaining yourself first. It is only a hint: for a chat about an unrelated project it changes nothing. `/wow-ai context` shows exactly what is sent; `/wow-ai context off` stops sending it (the bridge forgets it too), and `"gameContext": false` in `bridge/config.json` turns it off for good.
+
+Besides that, the addon reports what happens as you play (quests, zones, level-ups, deaths, your path) as small batches on the same pixel strip. The bridge writes them to `state/` in the working folder and adds a short summary to every run's system prompt, so the agent knows your recent history without you typing it and without a run per event: [docs/EVENTS.md](docs/EVENTS.md). `/wow-ai feed off` or `"feed": { "enabled": false }` turns it off.
 
 Along with it, every run gets [docs/WOW-ADDON-PRIMER.md](docs/WOW-ADDON-PRIMER.md): a short reference on writing addons and macros for this client (TOC layout, sandbox rules, common frames and events, where to verify an API), so "write me an addon that..." works from any folder, not just this repo. Edit the file to suit your setup; the bridge re-reads it on every run. `"primerFile": ""` in the config drops it, and `/wow-ai context off` turns it off together with the character context.
 
@@ -227,6 +230,7 @@ The keys you are most likely to touch. Every key, flag and environment variable 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the pixel strip, slot pool and signal files work, and why
 - [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md): Linux + Wine install, and how to check the screen capture
 - [docs/MAP.md](docs/MAP.md): map layers, the navigator and herb/ore nodes
+- [docs/EVENTS.md](docs/EVENTS.md): the event feed: what the addon reports, the files the agent reads, and how it is tested
 - [CONTRIBUTING.md](CONTRIBUTING.md): repo layout, running the tests, conventions
 - [CHANGELOG.md](CHANGELOG.md): release notes
 

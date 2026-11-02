@@ -213,6 +213,7 @@ local function InitDB()
 	s.width = s.width or 780
 	s.height = s.height or 500
 	db.lastSeq = db.lastSeq or 0
+	db.feedSeq = db.feedSeq or 0 -- event-feed batch numbers (Feed.lua); separate from message ids
 	-- Chats deleted in game that the bridge hasn't confirmed forgetting yet.
 	db.forget = db.forget or {}
 	-- Identifies this counter's lifetime. If the saved data is ever reset, a new
@@ -387,21 +388,31 @@ local function RefreshStrip()
 	for id, rec in pairs(run.outbound) do
 		if not rec.acked then table.insert(ids, id) end
 	end
-	if #ids == 0 then
+	-- An event-feed batch (Feed.lua) rides along when there is room; messages come first.
+	local feed = WoWAI.FeedRecord and WoWAI.FeedRecord() or nil
+	if #ids == 0 and not feed then
 		HideStrip()
 		return
 	end
 	table.sort(ids)
 	-- Newest first; drop the oldest if the frame would overflow.
-	local parts, size, latest = {}, 0, ids[#ids]
+	local parts, size, latest = {}, 0, ids[#ids] or feed.id
 	for i = #ids, 1, -1 do
 		local r = RecordFor(ids[i], run.outbound[ids[i]])
 		if size + #r + 1 > Codec.MAX_PAYLOAD then break end
 		table.insert(parts, 1, r)
 		size = size + #r + 1
 	end
+	if feed and size + #feed.text + 1 <= Codec.MAX_PAYLOAD then
+		table.insert(parts, feed.text)
+	end
+	if #parts == 0 then
+		HideStrip()
+		return
+	end
 	ShowStrip(latest, table.concat(parts, RS))
 end
+WoWAI.RefreshStrip = RefreshStrip
 
 ---------------------------------------------------------------------------
 -- Signals and slots (in)
@@ -2822,6 +2833,7 @@ local HELP = table.concat({
 	"/wow-ai agent [name]           which agent this chat talks to (no name = show; default = the bridge's). Right-clicking the chat and picking Agent does the same",
 	"/wow-ai reset                  next message in this chat starts a fresh agent session",
 	"/wow-ai context [on|off]       what the agent is told about your character and where you are (no argument = show it)",
+	"/wow-ai feed [on|off|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
 	"/wow-ai map [...]              map layers the agent drew, the route navigator and herb/ore nodes (no argument = status and subcommands; /aimap is the same)",
 	"/wow-ai mode pixel             no-reload transport (default)",
 	"/wow-ai mode reload            fallback transport: a /reload per step",
@@ -2865,6 +2877,7 @@ local COMMAND_ARGS = {
 	bind = 1, agent = 1,
 	chat = ChatArgument, chats = ChatArgument,
 	cd = true, new = true, rename = true,
+	feed = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest:match("^hold %d+%.?%d*$") ~= nil or rest:match("^shows %d$") ~= nil end,
 	map = true, -- /wow-ai map ...: Map.lua (layers, navigator, herb/ore nodes)
 	macro = { undo = true }, -- /wow-ai macro undo; "/ai macro for my warrior" still goes to the agent
 }
@@ -2941,6 +2954,8 @@ SlashCmdList["WOWAI"] = function(msg)
 	elseif cmd == "cd" then
 		WoWAI.SetFolder(rest, c)
 		WoWAI.Toggle(true)
+	elseif cmd == "feed" then
+		if WoWAIFeed then WoWAIFeed.Command(rest) else print("|cff66ccff[WoW AI]|r the event feed module did not load") end
 	elseif cmd == "map" then
 		if WoWAIMap then WoWAIMap.Command(rest) else print("|cff66ccff[WoW AI]|r the map module did not load") end
 	elseif cmd == "agent" then
