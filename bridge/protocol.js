@@ -113,13 +113,15 @@ function sameFolder(a, b) {
 // session (no prompt), "allow=Rule1,Rule2" = add these permission rules before
 // running, "c" = the record carries a game-context field before the text (an
 // empty one clears the context the bridge keeps), "agent=codex" = run this
-// chat with that agent instead of the bridge's default (see agents.js).
+// chat with that agent instead of the bridge's default (see agents.js), "e" = an
+// event-feed record (docs/EVENTS.md): its text is a payload for feed.js, never a prompt.
 function parseFlags(flags) {
   const out = { newSession: false, hello: false, forget: false, context: false, allow: [], agent: '' };
   for (const tok of String(flags || '').split(';')) {
     if (tok === 'n') out.newSession = true;
     else if (tok === 'h') out.hello = true;
     else if (tok === 'd') out.forget = true;
+    else if (tok === 'e') out.event = true;
     else if (tok === 'c') out.context = true;
     else if (tok.startsWith('allow=')) out.allow.push(...tok.slice(6).split(',').map(s => s.trim()).filter(Boolean));
     else if (tok.startsWith('agent=')) out.agent = tok.slice(6).trim().toLowerCase();
@@ -214,8 +216,11 @@ const MACRO_HINT = [
   'The addon shows the player a button that creates the macro (or updates one with the same name) and puts it on their cursor. Explain outside the block what it does. Avoid /run and /script unless asked; the player is warned about them.',
 ];
 
-function systemPrompt(ctx, primer) {
+// `feed` is the live-game summary from feed.js (empty when no events have arrived).
+function systemPrompt(ctx, primer, feed) {
   const lines = [...REPLY_FORMAT];
+  const live = String(feed || '').trim();
+  if (live) lines.push('', live);
   const text = String(ctx || '').trim();
   if (text) {
     lines.push('',

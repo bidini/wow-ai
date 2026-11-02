@@ -30,6 +30,7 @@ const readline = require('readline');
 const { spawn } = require('child_process');
 const P = require('./protocol'); // the pure protocol code, unit-tested in tests/bridge_test.js
 const A = require('./agents');   // how each agent is launched and read, unit-tested in tests/agents_test.js
+const Feed = require('./feed');  // the event feed: files and a prompt summary built from what the addon reports (docs/EVENTS.md)
 
 const HERE = __dirname;
 const CONFIG_FILE = path.join(HERE, 'config.json');
@@ -39,7 +40,8 @@ const TMP_DIR = path.join(HERE, 'tmp'); // prompt files for agents that read the
 
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
-  console.log('wow-ai [--project <dir>] [--once] [--inject "text" [--agent <id>]]\n\n' +
+  console.log('wow-ai [--project <dir>] [--once] [--inject "text" [--agent <id>]] [--inject-feed <file> [--feed-id <n>]]\n\n' +
+    '--inject-feed feeds a saved event-feed payload (docs/EVENTS.md) through the bridge as if the game had sent it, then exits.\n' +
     'Runs the WoW AI bridge. Chats without a folder of their own work in <dir>,\n' +
     'or in the folder you started it from, or in defaultCwd from bridge/config.json.\n' +
     `Agents: ${A.agentIds().join(', ')} (the default is "agent" in config.json; chats pick with /wow-ai agent).`);
@@ -57,6 +59,10 @@ const inject = injectIdx >= 0 ? argv[injectIdx + 1] : null;
 const agentIdx = argv.indexOf('--agent');
 const injectAgent = agentIdx >= 0 ? argv[agentIdx + 1] : '';
 const exitWhenIdle = once || inject !== null;
+const injectFeedIdx = argv.indexOf('--inject-feed');
+const injectFeed = injectFeedIdx >= 0 ? argv[injectFeedIdx + 1] : null;
+const feedIdIdx = argv.indexOf('--feed-id');
+const injectFeedId = feedIdIdx >= 0 ? Number(argv[feedIdIdx + 1]) : Date.now() % 1000000000;
 
 // The agent chats use unless they pick their own (/wow-ai agent, "agent=" flag).
 const DEFAULT_AGENT = A.normalizeAgent(cfg.agent || A.DEFAULT_AGENT);
@@ -103,6 +109,7 @@ const SAVED_VARS = String(cfg.savedVariablesFile || '').replace(/WoWClaude\.lua$
 let state = readJson(STATE_FILE, { lastId: 0, sessions: {}, handled: {} });
 if (!state.handled) state.handled = {};
 if (!state.sessions) state.sessions = {};
+if (!state.feed) state.feed = {};
 // Older versions stored handled[session] as "highest id so far"; expand to a map.
 for (const [k, v] of Object.entries(state.handled)) {
   if (typeof v === 'number') {
@@ -111,6 +118,14 @@ for (const [k, v] of Object.entries(state.handled)) {
     state.handled[k] = m;
   }
 }
+
+// The event feed (docs/EVENTS.md): files in <default folder>/state that the agent can Read,
+// plus a short summary in its system prompt. "feed": { "enabled": false } turns it off;
+// "dir" moves the files. Events never start an agent run.
+const FEED_CFG = Object.assign({ enabled: true, dir: '', maxFileBytes: 2000000 }, cfg.feed || {});
+const FEED_DIR = path.resolve(FEED_CFG.dir || path.join(DEFAULT_CWD, 'state'));
+const feed = FEED_CFG.enabled === false ? null
+  : Feed.createFeed({ dir: FEED_DIR, store: state.feed, log: (...a) => log(...a), maxFileBytes: FEED_CFG.maxFileBytes });
 
 // Bridge-side transcripts. The beta client sometimes wipes addon saved data; since
 // every prompt and reply passes through here, this copy lets the addon recover.
@@ -435,6 +450,15 @@ function allowRules(agentId, rules) {
 // ---------------------------------------------------------------------------
 
 function submit(job) {
+  if (job.event) {
+    // Event-feed record: write the files, no ack signal (it has none) and no agent run.
+    if (!feed) return;
+    try {
+      const r = feed.ingest(job);
+      if (!r.dup) saveState();
+    } catch (e) { log(`feed: could not store #${job.id}: ${e.message}`); }
+    return;
+  }
   if (alreadyHandled(job)) return;
   if (job.ctx !== undefined) setContext(job);
   if (job.forget) {
@@ -537,8 +561,9 @@ function runJob(job) {
   const resume = state.sessions[skey] || state.sessions[key];
 
   const ctx = gameContext();
-  const system = P.systemPrompt(ctx, primer());
-  const systemShort = P.systemPrompt(ctx, '');
+  const liveFeed = feed ? feed.block() : '';
+  const system = P.systemPrompt(ctx, primer(), liveFeed);
+  const systemShort = P.systemPrompt(ctx, '', liveFeed);
   const promptFile = path.join(TMP_DIR, `prompt-${job.id}-${Date.now().toString(36)}.txt`);
   const input = agent.input({ prompt: job.text, system, systemShort, resume, cfg: acfg });
   if (input.promptFile !== undefined) {
@@ -785,12 +810,18 @@ function banner() {
   console.log(`  sessions : ${Object.keys(state.sessions).length} saved`);
   const ctx = gameContext();
   console.log(`  context  : ${cfg.gameContext === false ? 'off (gameContext in config.json)' : ctx ? (ctx.split('\n').find(l => /^Character:/i.test(l)) || ctx.split('\n')[0]).slice(0, 100) : 'none yet (the addon sends it with its hello; /wow-ai context in game)'}`);
+  console.log(`  feed     : ${feed ? FEED_DIR + (feed.state.lastRx ? ' (last update ' + Feed.ago(Date.now() - feed.state.lastRx) + ' ago)' : ' (nothing received yet)') : 'off (feed.enabled in config.json)'}`);
   console.log(`  primer   : ${!PRIMER_FILE ? 'off (primerFile in config.json)' : primer() ? path.resolve(REPO, PRIMER_FILE) + ' (' + primer().length + ' chars, with the context)' : 'NOT FOUND: ' + path.resolve(REPO, PRIMER_FILE)}`);
   console.log('Leave this window open while you play. Ctrl+C to stop.\n');
 }
 
 banner();
-if (inject !== null) {
+if (injectFeed !== null) {
+  let payload;
+  try { payload = fs.readFileSync(injectFeed, 'utf8'); } catch (e) { console.error(`cannot read ${injectFeed}: ${e.message}`); process.exit(1); }
+  submit({ session: 'inject', chat: '', id: injectFeedId, cwd: '', event: true, name: '', text: payload, via: 'inject' });
+  process.exit(0);
+} else if (inject !== null) {
   submit({ id: state.lastId + 1, session: '', chat: '', text: inject, cwd: '', newSession: false, via: 'inject', agent: injectAgent || '' });
 } else {
   pollSavedVariables();

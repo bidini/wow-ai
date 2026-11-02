@@ -94,6 +94,9 @@ const cases = [
   { id: 4242, payload: 'sess1\x1Fchat1\x1F4242\x1FC:\\x\x1Fn\x1F\x1F' + 'Refactor the player controller so jumping feels less floaty. '.repeat(40), jitter: 60, gamma: 0.6 },
   { id: 9, payload: 'sess1\x1Fchat1\x1F9\x1FC:\\x\x1F\x1F\x1F' + 'a fairly long paste: '.repeat(140), jitter: 100, gamma: 1.8 },
   { id: 65000, payload: '\x1F\x1F\x1F\x1F\x1F\x1Fx', jitter: 120, gamma: 1 },
+  // Event-feed batches (docs/EVENTS.md): tabs, newlines, accents, and a typical and a full-size payload.
+  { id: 12, payload: 'sess1\x1F\x1F12\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tForêt d\'Elwynn\tGoldshire\t0\t10\t100', 'Q\t176*\t33', 'E\t1700000001\tqaccept\t33\tLoups à la frontière', 'P\t1700000002\t1429\t421\t659'].join('\n'), jitter: 40, gamma: 1.3 },
+  { id: 13, payload: 'sess1\x1F\x1F13\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100'].concat(Array.from({ length: 40 }, (_, i) => 'E\t' + (1700000000 + i) + '\tqaccept\t' + i + '\tQuest number ' + i)).concat(Array.from({ length: 20 }, (_, i) => 'P\t' + (1700000100 + i) + '\t1429\t' + (400 + i) + '\t' + (600 + i))).join('\n'), jitter: 90, gamma: 0.8 },
 ];
 
 let pass = 0, total = 0;

@@ -13,7 +13,7 @@ const SRC = path.join(__dirname, '..', 'bridge');
 fs.rmSync(S, { recursive: true, force: true });
 fs.mkdirSync(path.join(S, 'addons', 'WoWAI'), { recursive: true });
 fs.mkdirSync(path.join(S, 'proj'), { recursive: true });
-for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'install-slots.js', 'capture.ps1']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
+for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'install-slots.js', 'capture.ps1']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
 const agentIdx = process.argv.indexOf('--agent');
 const agent = agentIdx >= 0 ? process.argv[agentIdx + 1] : 'claude';
 fs.writeFileSync(path.join(S, 'addons', 'WoWAI', 'WoWAI.toc'), '## Interface: 16001\n');
