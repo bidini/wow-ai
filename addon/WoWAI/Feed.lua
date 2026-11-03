@@ -12,6 +12,10 @@
 --   E t type args...                      an event
 --   P t map x10 y10                       a position sample (x10 = tenths of a percent)
 --   D n                                   n lines were dropped to fit
+--   H race class faction                  the character (sent when it changes)
+--   I slot=itemID ...                     equipped items (sent when they change; an empty line = nothing)
+--   R skill=rank/max ...                  skills and professions (sent when they change)
+--   A gen i n spell=rank ...              chunk i of n of the spells learned (a set, sent when it changes)
 --   E t taxi secs fromMap fx10 fy10 toMap tx10 ty10   a flight, timed take-off to landing
 --   K cont w h                            continent size in yards (docs/DISTANCE.md)
 --   W map cont minX maxX minY maxY name   where a map lies on its continent, in ten-thousandths
@@ -42,13 +46,20 @@ local ATLAS_PER_BATCH = 8   -- maps described per batch
 local ATLAS_BYTES = 760     -- atlas lines only fill what the other head lines leave under this
 local ATLAS_QUEUE = 120
 local ATLAS_SCALE = 10000
+local INFO_FIRST = 1         -- read the character this long after entering the world
+local INFO_DEBOUNCE = 3      -- wait this long after gear, skills or spells change
+local INFO_HEAD_BYTES = 900 -- character lines only fill what the other head lines leave under this
+local SPELLS_PER_CHUNK = 12
+local CHUNKS_PER_BATCH = 2
+local MAX_SPELLS = 360
+local MAX_SKILLS = 24
 local TAXI_MIN = 10        -- a flight shorter than this is not reported
 local TAXI_LAND_WAIT = 5   -- wait this long for a position after landing
 local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
 local US = "\31"
 
 local F = {
-	pending = {}, samples = {}, turned = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {},
+	pending = {}, samples = {}, turned = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {}, infoSent = {}, infoPending = {}, spellQueue = {},
 	stats = { built = 0, sent = 0, dropped = 0, errors = 0 },
 }
 
@@ -220,6 +231,7 @@ local function Snapshot()
 		Speed(cur), Speed(run),
 		Clean(Try(GetZoneText), 40), Clean(Try(GetSubZoneText), 40),
 		F.dead and 1 or 0, Try(UnitXP, "player") or 0, Try(UnitXPMax, "player") or 0,
+		Try(GetMoney) or "",
 	}, "\t")
 end
 
@@ -311,6 +323,101 @@ local function DrainAtlas(headSize)
 end
 
 ---------------------------------------------------------------------------
+-- The character: race and class, equipped items, skills, spells learned (docs/EVENTS.md).
+-- Each part is read when something may have changed and sent only if it differs from what
+-- was sent before in this session.
+---------------------------------------------------------------------------
+
+local function ReadHero()
+	local race = Try(UnitRace, "player")
+	local class = Try(UnitClass, "player")
+	local faction = Try(UnitFactionGroup, "player")
+	if type(race) ~= "string" and type(class) ~= "string" then return nil end
+	return table.concat({ "H", Clean(race, 30), Clean(class, 30), Clean(faction, 20) }, "\t")
+end
+
+local function ReadGear()
+	if type(GetInventoryItemID) ~= "function" then return nil end
+	local parts = { "I" }
+	for slot = 1, 19 do
+		local id = Try(GetInventoryItemID, "player", slot)
+		if type(id) == "number" and id > 0 then parts[#parts + 1] = slot .. "=" .. id end
+	end
+	return table.concat(parts, "\t")
+end
+
+local function ReadSkills()
+	local n = Try(GetNumSkillLines)
+	if type(n) ~= "number" then return nil end
+	local parts = { "R" }
+	for i = 1, math.min(n, 80) do
+		local name, header, _, rank, _, _, max = Try(GetSkillLineInfo, i)
+		if type(name) == "string" and not header and type(rank) == "number" and type(max) == "number" and #parts <= MAX_SKILLS then
+			parts[#parts + 1] = (Clean(name, 30):gsub("[=\t]", " ")) .. "=" .. math.floor(rank) .. "/" .. math.floor(max)
+		end
+	end
+	return table.concat(parts, "\t")
+end
+
+-- The spellbook as "name=rank" entries, the highest rank of each spell once. nil if this client
+-- has no spellbook functions.
+local function ReadSpells()
+	local tabs = Try(GetNumSpellTabs)
+	if type(tabs) ~= "number" or (type(GetSpellBookItemName) ~= "function" and type(GetSpellName) ~= "function") then return nil end
+	local best, order = {}, {}
+	for t = 1, tabs do
+		local _, _, offset, count = Try(GetSpellTabInfo, t)
+		if type(offset) == "number" and type(count) == "number" then
+			for i = offset + 1, offset + count do
+				local kind = Try(GetSpellBookItemInfo, i, "spell")
+				if kind ~= "FUTURESPELL" and kind ~= "FLYOUT" then
+					local name, sub = Try(GetSpellBookItemName, i, "spell")
+					if type(name) ~= "string" then name, sub = Try(GetSpellName, i, "spell") end
+					if type(name) == "string" and name ~= "" and #order < MAX_SPELLS then
+						name = (Clean(name, 40):gsub("[=\t]", " "))
+						local rank = tonumber(tostring(sub or ""):match("(%d+)")) or 0
+						if best[name] == nil then order[#order + 1] = name; best[name] = rank
+						elseif rank > best[name] then best[name] = rank end
+					end
+				end
+			end
+		end
+	end
+	local out = {}
+	for _, name in ipairs(order) do out[#out + 1] = best[name] > 0 and (name .. "=" .. best[name]) or name end
+	return out
+end
+
+local function ArmFlush()
+	local at = GetTime() + DEBOUNCE
+	if not F.flushAt or at < F.flushAt then F.flushAt = at end
+end
+
+local function CheckInfo()
+	local sent = F.infoSent
+	local function Put(key, line)
+		if line and sent[key] ~= line then sent[key] = line; F.infoPending[key] = line end
+	end
+	Put("H", ReadHero()); Put("I", ReadGear()); Put("R", ReadSkills())
+	local spells = ReadSpells()
+	if spells then
+		local sig = table.concat(spells, "\t")
+		if sent.A ~= sig then
+			sent.A = sig
+			F.spellGen = math.max(Now(), (F.spellGen or 0) + 1)
+			F.spellQueue = {}                                     -- a set not yet sent is out of date
+			local n = math.max(1, math.ceil(#spells / SPELLS_PER_CHUNK))
+			for i = 1, n do
+				local part = {}
+				for k = (i - 1) * SPELLS_PER_CHUNK + 1, math.min(i * SPELLS_PER_CHUNK, #spells) do part[#part + 1] = spells[k] end
+				F.spellQueue[#F.spellQueue + 1] = "A\t" .. F.spellGen .. "\t" .. i .. "\t" .. n .. "\t" .. table.concat(part, "\t")
+			end
+		end
+	end
+	if next(F.infoPending) or #F.spellQueue > 0 then ArmFlush() end
+end
+
+---------------------------------------------------------------------------
 -- Flights (docs/DISTANCE.md): UnitOnTaxi is true from take-off to landing. A ride is
 -- reported once, from the spot you stood on just before take-off to the first spot
 -- after landing, so the bridge can learn how long that route takes.
@@ -364,11 +471,21 @@ local function Build()
 	do
 		local headSize = 0
 		for _, l in ipairs(head) do headSize = headSize + #l + 1 end
-		for _, l in ipairs(DrainAtlas(headSize)) do head[#head + 1] = l end
-		if #F.atlasQueue > 0 then
-			local at = GetTime() + DEBOUNCE
-			if not F.flushAt or at < F.flushAt then F.flushAt = at end
+		local function Take(line)
+			if headSize + #line + 1 > INFO_HEAD_BYTES then return false end
+			head[#head + 1] = line
+			headSize = headSize + #line + 1
+			return true
 		end
+		for _, key in ipairs({ "H", "I", "R" }) do
+			local line = F.infoPending[key]
+			if line and Take(line) then F.infoPending[key] = nil end
+		end
+		for _ = 1, CHUNKS_PER_BATCH do
+			if #F.spellQueue > 0 and Take(F.spellQueue[1]) then table.remove(F.spellQueue, 1) end
+		end
+		for _, l in ipairs(DrainAtlas(headSize)) do head[#head + 1] = l end
+		if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 then ArmFlush() end
 	end
 	local ev, sm = F.pending, F.samples
 	local function size()
@@ -397,7 +514,7 @@ local function Build()
 	local wire = table.concat({ Wire(db.session), "", tostring(db.feedSeq), "", "e", "", payload }, US)
 	F.out = { seq = db.feedSeq, wire = wire, shows = 0, nextAt = now, createdAt = now, bytes = #payload }
 	F.pending, F.samples, F.flushAt = {}, {}, nil
-	if #F.atlasQueue > 0 then F.flushAt = now + DEBOUNCE end
+	if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 then F.flushAt = now + DEBOUNCE end
 	F.lastBuild = now
 	F.stats.built = F.stats.built + 1
 end
@@ -429,6 +546,10 @@ function M.Tick()
 		CheckQuests()
 	end
 	CheckTaxi(now)
+	if F.infoAt and now >= F.infoAt then
+		F.infoAt = nil
+		CheckInfo()
+	end
 	if now >= (F.nextSample or 0) then
 		F.nextSample = now + SAMPLE_SECONDS
 		Sample()
@@ -441,7 +562,7 @@ function M.Tick()
 	if not F.out then
 		if now - (F.lastBuild or now) >= HEARTBEAT and #F.pending == 0 then Event("tick") end
 		local due = (F.flushAt and now >= F.flushAt) or #F.samples >= FLUSH_SAMPLES
-		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0) then Build() end
+		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0) then Build() end
 	end
 	o = F.out
 	if o and not o.showing and o.shows < Shows() and now >= o.nextAt and WoWAI.IsConnected() then
@@ -461,6 +582,7 @@ function M.OnEvent(event, a1, a2)
 		if not F.started then
 			F.started = true
 			F.lastBuild = GetTime()
+			F.infoSent = {}                                    -- a new session sends the character again
 			C_Timer.NewTicker(1, function()
 				local ok, err = pcall(M.Tick)
 				if not ok then F.stats.errors = F.stats.errors + 1; F.lastError = tostring(err) end
@@ -469,6 +591,7 @@ function M.OnEvent(event, a1, a2)
 		if a1 or a2 then Event("login", a1 and "initial" or "reload") end
 		F.questCheckAt = GetTime() + 3
 		F.flying, F.ride, F.landing, F.ground = false, nil, nil, nil
+		F.infoAt = F.infoAt or (GetTime() + INFO_FIRST)   -- soon enough to ride in the login batch
 		F.zone, F.sub = Try(GetZoneText), Try(GetSubZoneText)
 		QueueAtlas()
 	elseif event == "ZONE_CHANGED_NEW_AREA" then
@@ -484,6 +607,9 @@ function M.OnEvent(event, a1, a2)
 		F.sub = sub
 	elseif event == "PLAYER_LEVEL_UP" then
 		Event("level", a1 or Try(UnitLevel, "player") or "")
+		F.infoAt = F.infoAt or (GetTime() + INFO_DEBOUNCE)
+	elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "SKILL_LINES_CHANGED" then
+		F.infoAt = F.infoAt or (GetTime() + INFO_DEBOUNCE)
 	elseif event == "PLAYER_DEAD" then
 		F.dead = true
 		Event("dead")
@@ -507,6 +633,7 @@ end
 local GAME_EVENTS = {
 	"PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS",
 	"PLAYER_LEVEL_UP", "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST", "QUEST_LOG_UPDATE", "QUEST_TURNED_IN",
+	"PLAYER_EQUIPMENT_CHANGED", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "SKILL_LINES_CHANGED",
 }
 
 local frame = CreateFrame("Frame")
@@ -527,7 +654,7 @@ function M.Status()
 		enabled = Enabled(), built = F.stats.built, sent = F.stats.sent, dropped = F.stats.dropped, errors = F.stats.errors,
 		pending = #F.pending, samples = #F.samples, seq = WoWAIDB and WoWAIDB.feedSeq or 0, lastError = F.lastError,
 		hold = Hold(), shows = Shows(), showing = F.out ~= nil and F.out.showing or false, waiting = F.out ~= nil,
-		atlasQueued = #F.atlasQueue,
+		atlasQueued = #F.atlasQueue, infoQueued = #F.spellQueue + (next(F.infoPending) and 1 or 0),
 	}
 end
 
@@ -540,6 +667,10 @@ function M.Command(rest)
 	if rest == "on" or rest == "off" then
 		s.feed = rest == "on"
 		say("event feed " .. rest)
+	elseif rest == "info" then
+		F.infoSent = {}
+		F.infoAt = GetTime()
+		say("character, gear, skills and spells will be sent again")
 	elseif rest == "atlas" then
 		F.atlasSent, F.atlasKnown, F.atlasQueue = {}, {}, {}
 		QueueAtlas()
@@ -555,6 +686,6 @@ function M.Command(rest)
 		say(string.format("event feed %s: %d batch(es) built, %d fully shown, %d line(s) dropped, %d waiting (%d position samples), last number %d%s",
 			st.enabled and "ON" or "OFF", st.built, st.sent, st.dropped, st.pending, st.samples, st.seq,
 			st.errors > 0 and (", " .. st.errors .. " error(s): " .. tostring(st.lastError)) or ""))
-		say(string.format("shows: %d x %.1f s. /wow-ai feed on|off|atlas, /wow-ai feed hold <seconds>, /wow-ai feed shows <n>", st.shows, st.hold))
+		say(string.format("shows: %d x %.1f s. /wow-ai feed on|off|atlas|info, /wow-ai feed hold <seconds>, /wow-ai feed shows <n>", st.shows, st.hold))
 	end
 end

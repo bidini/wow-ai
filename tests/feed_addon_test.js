@@ -599,3 +599,120 @@ test('taxi: end to end, a ride the addon timed becomes a learned shortcut in the
   assert.deepEqual([l.from.x, l.from.y, l.to.x, l.to.y], [40, 50, 90, 50]);
   assert.match(feed.summary(), /flew 6\d s from map 1431 \(40\.0, 50\.0\) to map 1431 \(90\.0, 50\.0\)/);
 });
+
+// ---------------------------------------------------------------------------
+// The character (docs/EVENTS.md): gold in every snapshot; race, class, gear, skills and spells
+// when they change. Spells travel in chunks of 12, two chunks to a batch.
+// ---------------------------------------------------------------------------
+
+const CHAR_STUB = `
+STUB.gear = { [1] = 1234, [5] = 2345, [16] = 3456 }
+function GetInventoryItemID(unit, slot) return STUB.gear[slot] end
+STUB.spells = { { "Heroic Strike", "Rank 1" }, { "Heroic Strike", "Rank 2" }, { "Battle Shout", "Rank 1" }, { "Charge", "Rank 1" } }
+function GetNumSpellTabs() return 1 end
+function GetSpellTabInfo(t) return "General", "tex", 0, #STUB.spells end
+function GetSpellBookItemName(i, book) local s = STUB.spells[i]; if s then return s[1], s[2] end end
+function GetSpellBookItemInfo(i, book) local s = STUB.spells[i]; if s then return s[3] or "SPELL", 1 end end
+`;
+function charVM() {
+  const vm = newVM();
+  vm.run(CHAR_STUB);
+  login(vm);
+  connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  return vm;
+}
+const linesStarting = (batches, letter) => batches.flatMap(b => linesOf(b).filter(l => l.startsWith(letter + '\t') || l === letter));
+
+test('character: the first batches carry race and class, gear, skills and the spells, once', () => {
+  const vm = charVM();
+  vm.run('STUB.money = 123456');
+  const batches = collect(vm, 70);
+  assert.deepEqual(linesStarting(batches, 'H'), ['H\tNight Elf\tHunter\tAlliance']);
+  assert.deepEqual(linesStarting(batches, 'I'), ['I\t1=1234\t5=2345\t16=3456']);
+  assert.deepEqual(linesStarting(batches, 'R'), ['R\tBows=46/115\tSkinning=75/75\tFirst Aid=40/75\tSwords=10/115']);
+  const a = linesStarting(batches, 'A');
+  assert.equal(a.length, 1);
+  assert.match(a[0], /^A\t\d+\t1\t1\tHeroic Strike=2\tBattle Shout=1\tCharge=1$/, 'highest rank per spell, once each');
+  const s = linesStarting(batches, 'S');
+  assert.equal(s[s.length - 1].split('\t')[13], '123456', 'gold rides in every snapshot');
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('character: nothing is sent again while nothing changes; changed gear is sent alone', () => {
+  const vm = charVM();
+  collect(vm, 70);
+  assert.deepEqual(linesStarting(collect(vm, 40), 'I'), [], 'quiet');
+  vm.run('STUB.gear[5] = 9999; STUB.FireEvent("PLAYER_EQUIPMENT_CHANGED")');
+  const batches = collect(vm, 30);
+  assert.deepEqual(linesStarting(batches, 'I'), ['I\t1=1234\t5=9999\t16=3456']);
+  for (const k of ['H', 'R', 'A']) assert.deepEqual(linesStarting(batches, k), [], k + ' unchanged');
+  vm.run('STUB.gear = {}; STUB.FireEvent("PLAYER_EQUIPMENT_CHANGED")');
+  assert.deepEqual(linesStarting(collect(vm, 30), 'I'), ['I'], 'everything taken off is reported as an empty line');
+});
+
+test('character: a new spell sends the whole set again under a newer number', () => {
+  const vm = charVM();
+  const first = linesStarting(collect(vm, 70), 'A');
+  vm.run('table.insert(STUB.spells, { "Rend", "Rank 1" }); STUB.FireEvent("SPELLS_CHANGED")');
+  const second = linesStarting(collect(vm, 30), 'A');
+  assert.equal(second.length, 1);
+  assert.ok(Number(second[0].split('\t')[1]) > Number(first[0].split('\t')[1]), 'a newer set number');
+  assert.match(second[0], /Heroic Strike=2\tBattle Shout=1\tCharge=1\tRend=1$/);
+});
+
+test('character: a big spellbook goes out in chunks of 12, two to a batch, each batch inside the size cap', () => {
+  const vm = newVM();
+  vm.run(CHAR_STUB);
+  vm.run('STUB.spells = {}; for i = 1, 61 do STUB.spells[i] = { "Spell number " .. i, "Rank " .. (i % 3 + 1) } end');
+  login(vm); connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  const batches = collect(vm, 150);
+  const a = linesStarting(batches, 'A').map(l => l.split('\t'));
+  assert.equal(a.length, 6, '61 spells make six chunks');
+  assert.equal(new Set(a.map(x => x[1])).size, 1, 'one set number');
+  assert.deepEqual(a.map(x => Number(x[2])).sort(), [1, 2, 3, 4, 5, 6]);
+  assert.ok(a.every(x => x[3] === '6'));
+  assert.equal(a.reduce((n, x) => n + x.length - 4, 0), 61);
+  for (const b of batches) {
+    assert.ok(b.text.length <= 1250, `batch of ${b.text.length}`);
+    assert.ok(linesOf(b).filter(l => l.startsWith('A\t')).length <= 2);
+  }
+});
+
+test('character: a client without the gear or spellbook functions sends no such lines and raises no error', () => {
+  const vm = ready({ settle: false });
+  const batches = collect(vm, 70);
+  assert.deepEqual(linesStarting(batches, 'I'), []);
+  assert.deepEqual(linesStarting(batches, 'A'), []);
+  assert.equal(linesStarting(batches, 'H').length, 1, 'race and class still go out');
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('character: /wow-ai feed info sends everything again', () => {
+  const vm = charVM();
+  collect(vm, 70);
+  vm.run('SlashCmdList.WOWAI("feed info")');
+  const batches = collect(vm, 40);
+  assert.equal(linesStarting(batches, 'H').length, 1);
+  assert.equal(linesStarting(batches, 'I').length, 1);
+  assert.equal(linesStarting(batches, 'A').length, 1);
+});
+
+test('character: end to end, the strip becomes the character record in the bridge', () => {
+  const vm = charVM();
+  vm.run('STUB.money = 123456');
+  const batches = collect(vm, 70);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'char-e2e-'));
+  const feed = Feed.createFeed({ dir: path.join(dir, 'state'), store: {} });
+  for (const b of batches) {
+    const [j] = P.jobsFromStrip(b.id, ['s', '', b.id, '', 'e', '', b.text].join('\x1F')).filter(x => x.event);
+    feed.ingest(j);
+  }
+  const c = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'snapshot.json'), 'utf8')).character;
+  assert.deepEqual([c.race, c.class, c.faction, c.gold], ['Night Elf', 'Hunter', 'Alliance', 123456]);
+  assert.deepEqual(c.equipped, { 1: 1234, 5: 2345, 16: 3456 });
+  assert.deepEqual(c.spells.map(s => s.name), ['Battle Shout', 'Charge', 'Heroic Strike']);
+  assert.equal(c.skills.length, 4);
+  assert.match(feed.summary(), /Character: Night Elf Hunter \(Alliance\), 12g 34s 56c, 3 items equipped, 3 spells, skills: Bows 46\/115, Skinning 75\/75, First Aid 40\/75, Swords 10\/115\./);
+});

@@ -99,6 +99,8 @@ const cases = [
   { id: 13, payload: 'sess1\x1F\x1F13\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100'].concat(Array.from({ length: 40 }, (_, i) => 'E\t' + (1700000000 + i) + '\tqaccept\t' + i + '\tQuest number ' + i)).concat(Array.from({ length: 20 }, (_, i) => 'P\t' + (1700000100 + i) + '\t1429\t' + (400 + i) + '\t' + (600 + i))).join('\n'), jitter: 90, gamma: 0.8 },
   // A batch with the atlas lines of docs/DISTANCE.md (a continent size and 8 zone maps).
   { id: 14, payload: 'sess1\x1F\x1F14\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100', 'K\t0\t40000\t30000'].concat(Array.from({ length: 8 }, (_, i) => 'W\t' + (1429 + i) + '\t0\t' + (3000 + i * 10) + '\t' + (3500 + i * 10) + '\t7000\t7500\tZone ' + i + ' Forêt')).join('\n'), jitter: 70, gamma: 1.2 },
+  // A login batch with the character lines (docs/EVENTS.md): race and class, gear, skills and two spell chunks.
+  { id: 15, payload: 'sess1\x1F\x1F15\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t12\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100\t123456', 'H\tNight Elf\tHunter\tAlliance', 'I\t1=1234\t2=2345\t3=3456\t5=4567\t6=5678\t7=6789\t8=7890\t10=8901\t16=9012', 'R\tBows=46/115\tSkinning=75/75\tFirst Aid=40/75\tSwords=10/115'].concat(Array.from({ length: 2 }, (_, c) => 'A\t1700000001\t' + (c + 1) + '\t6\t' + Array.from({ length: 12 }, (_, i) => 'Spell number ' + (c * 12 + i) + '=' + (i % 4 + 1)).join('\t'))).join('\n'), jitter: 70, gamma: 1.2 },
 ];
 
 let pass = 0, total = 0;
