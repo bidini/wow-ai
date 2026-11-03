@@ -12,6 +12,7 @@
 --   E t type args...                      an event
 --   P t map x10 y10                       a position sample (x10 = tenths of a percent)
 --   D n                                   n lines were dropped to fit
+--   E t taxi secs fromMap fx10 fy10 toMap tx10 ty10   a flight, timed take-off to landing
 --   K cont w h                            continent size in yards (docs/DISTANCE.md)
 --   W map cont minX maxX minY maxY name   where a map lies on its continent, in ten-thousandths
 -- No ack files are used: a batch is shown for HOLD seconds, SHOWS times, and the bridge
@@ -41,6 +42,8 @@ local ATLAS_PER_BATCH = 8   -- maps described per batch
 local ATLAS_BYTES = 760     -- atlas lines only fill what the other head lines leave under this
 local ATLAS_QUEUE = 120
 local ATLAS_SCALE = 10000
+local TAXI_MIN = 10        -- a flight shorter than this is not reported
+local TAXI_LAND_WAIT = 5   -- wait this long for a position after landing
 local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
 local US = "\31"
 
@@ -308,6 +311,44 @@ local function DrainAtlas(headSize)
 end
 
 ---------------------------------------------------------------------------
+-- Flights (docs/DISTANCE.md): UnitOnTaxi is true from take-off to landing. A ride is
+-- reported once, from the spot you stood on just before take-off to the first spot
+-- after landing, so the bridge can learn how long that route takes.
+---------------------------------------------------------------------------
+
+local function CheckTaxi(now)
+	local on = Try(UnitOnTaxi, "player")
+	if on == nil then return end
+	if on then
+		if not F.flying then
+			F.flying = true
+			local g = F.ground
+			F.ride = (g and now - g.t <= 5) and { at = now, from = g } or nil   -- no known start: not reported
+		end
+		return
+	end
+	if F.flying then
+		F.flying = false
+		if F.ride then F.ride.landedAt = now; F.landing = F.ride end
+		F.ride = nil
+	end
+	local m, x, y = Pos()
+	local r = F.landing
+	if r then
+		if m then
+			F.landing = nil
+			local secs = math.floor(r.landedAt - r.at + 0.5)
+			if secs >= TAXI_MIN then
+				Event("taxi", secs, r.from.m, Tenths(r.from.x), Tenths(r.from.y), m, Tenths(x), Tenths(y))
+			end
+		elseif now - r.landedAt > TAXI_LAND_WAIT then
+			F.landing = nil
+		end
+	end
+	if m then F.ground = { m = m, x = x, y = y, t = now } end
+end
+
+---------------------------------------------------------------------------
 -- Sending
 ---------------------------------------------------------------------------
 
@@ -387,6 +428,7 @@ function M.Tick()
 		F.questCheckAt = nil
 		CheckQuests()
 	end
+	CheckTaxi(now)
 	if now >= (F.nextSample or 0) then
 		F.nextSample = now + SAMPLE_SECONDS
 		Sample()
@@ -426,6 +468,7 @@ function M.OnEvent(event, a1, a2)
 		end
 		if a1 or a2 then Event("login", a1 and "initial" or "reload") end
 		F.questCheckAt = GetTime() + 3
+		F.flying, F.ride, F.landing, F.ground = false, nil, nil, nil
 		F.zone, F.sub = Try(GetZoneText), Try(GetSubZoneText)
 		QueueAtlas()
 	elseif event == "ZONE_CHANGED_NEW_AREA" then

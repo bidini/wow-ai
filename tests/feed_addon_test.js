@@ -513,3 +513,89 @@ test('atlas: end to end, the strip becomes yards in the bridge', () => {
   assert.match(feed.summary(), /on map 1431 \(continent 100, 13000,21750 yards\)/);
   assert.match(fs.readFileSync(path.join(dir, 'state', 'maps.txt'), 'utf8'), /^1431 \| Duskwood \| 100 \| 12000 \| 21000 \| 2000 \| 1500$/m);
 });
+
+// ---------------------------------------------------------------------------
+// Learned shortcuts: the addon times flights (UnitOnTaxi) and reports one `taxi`
+// event per ride: seconds, then where it started and ended.
+// ---------------------------------------------------------------------------
+
+const TAXI_STUB = `
+function UnitOnTaxi(unit) return STUB.onTaxi or false end
+C_Map.GetPlayerMapPosition = function(mapId, unit) if STUB.noPos then return nil end return { x = STUB.posX or 0.452, y = STUB.posY or 0.678 } end
+`;
+function taxiVM() {
+  const vm = ready();
+  vm.run(TAXI_STUB);
+  vm.run('STUB.posX = 0.4; STUB.posY = 0.5');
+  advance(vm, 3);
+  return vm;
+}
+const taxiEvents = batches => batches.flatMap(b => linesOf(b).filter(l => /^E\t\d+\ttaxi\t/.test(l)));
+
+test('taxi: a flight is timed and reported once, from where you boarded to where you landed', () => {
+  const vm = taxiVM();
+  vm.run('STUB.onTaxi = true; STUB.posX = 0.5');
+  advance(vm, 40);
+  vm.run('STUB.posX = 0.7; STUB.onTaxi = false');
+  const events = taxiEvents(collect(vm, 25));
+  assert.equal(events.length, 1, events.join(' | '));
+  const f = events[0].split('\t').slice(3).map(Number);   // seconds, fromMap, fx, fy, toMap, tx, ty
+  assert.ok(f[0] >= 39 && f[0] <= 42, `seconds ${f[0]}`);
+  assert.deepEqual(f.slice(1), [1431, 400, 500, 1431, 700, 500]);
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('taxi: a ride under ten seconds, one that began before you were in the world, or one that ends nowhere is not reported', () => {
+  const short = taxiVM();
+  short.run('STUB.onTaxi = true'); advance(short, 4); short.run('STUB.onTaxi = false');
+  assert.deepEqual(taxiEvents(collect(short, 25)), []);
+
+  const midflight = ready({ settle: false });
+  midflight.run(TAXI_STUB);
+  midflight.run('STUB.onTaxi = true');
+  advance(midflight, 30); midflight.run('STUB.onTaxi = false');
+  assert.deepEqual(taxiEvents(collect(midflight, 25)), [], 'no known start, so no ride');
+
+  const lost = taxiVM();
+  lost.run('STUB.onTaxi = true'); advance(lost, 30);
+  lost.run('STUB.noPos = true; STUB.onTaxi = false'); advance(lost, 8);
+  lost.run('STUB.noPos = false');
+  assert.deepEqual(taxiEvents(collect(lost, 25)), [], 'the landing spot never came');
+});
+
+test('taxi: a landing spot that arrives a moment late still counts', () => {
+  const vm = taxiVM();
+  vm.run('STUB.onTaxi = true'); advance(vm, 30);
+  vm.run('STUB.noPos = true; STUB.onTaxi = false'); advance(vm, 2);
+  vm.run('STUB.noPos = false; STUB.posX = 0.8');
+  const events = taxiEvents(collect(vm, 25));
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].split('\t').slice(7).map(Number), [1431, 800, 500]);
+});
+
+test('taxi: a client without UnitOnTaxi sends nothing and raises no error', () => {
+  const vm = ready();
+  vm.run('UnitOnTaxi = nil');
+  advance(vm, 30);
+  assert.deepEqual(taxiEvents(collect(vm, 20)), []);
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('taxi: end to end, a ride the addon timed becomes a learned shortcut in the bridge', () => {
+  const vm = taxiVM();
+  vm.run('STUB.onTaxi = true; STUB.posX = 0.5'); advance(vm, 60);
+  vm.run('STUB.posX = 0.9; STUB.onTaxi = false');
+  const batches = collect(vm, 25);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taxi-e2e-'));
+  const feed = Feed.createFeed({ dir: path.join(dir, 'state'), store: {} });
+  for (const b of batches) {
+    const [j] = P.jobsFromStrip(b.id, ['s', '', b.id, '', 'e', '', b.text].join('\x1F')).filter(x => x.event);
+    feed.ingest(j);
+  }
+  assert.equal(feed.atlas.learned.length, 1);
+  const l = feed.atlas.learned[0];
+  assert.equal(l.kind, 'flight');
+  assert.ok(l.seconds >= 59 && l.seconds <= 62, `seconds ${l.seconds}`);
+  assert.deepEqual([l.from.x, l.from.y, l.to.x, l.to.y], [40, 50, 90, 50]);
+  assert.match(feed.summary(), /flew 6\d s from map 1431 \(40\.0, 50\.0\) to map 1431 \(90\.0, 50\.0\)/);
+});
