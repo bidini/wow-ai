@@ -17,7 +17,7 @@ const RECENT_POINTS = 600;
 const SUMMARY_MAX = 1800;
 const SEEN_KEYS = 64;         // recent (seq, content) pairs remembered per session
 const DAY_MS = 24 * 3600 * 1000;
-const KNOWN_TYPES = new Set(['login', 'zone', 'sub', 'level', 'dead', 'alive', 'qaccept', 'qready', 'qdone', 'qdrop', 'tick']);
+const KNOWN_TYPES = new Set(['taxi', 'login', 'zone', 'sub', 'level', 'dead', 'alive', 'qaccept', 'qready', 'qdone', 'qdrop', 'tick']);
 
 function clean(s, max = MAX_FIELD) {
   return String(s ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
@@ -87,6 +87,14 @@ function ago(ms) {
   return Math.floor(s / 3600) + 'h' + String(Math.floor(s / 60) % 60).padStart(2, '0') + 'm';
 }
 
+// taxi event args: seconds, fromMap, fx10, fy10, toMap, tx10, ty10 (tenths of a percent).
+function taxiTrip(a) {
+  const n = i => (/^\d{1,6}$/.test(a[i] || '') ? Number(a[i]) : null);
+  const [secs, fm, fx, fy, tm, tx, ty] = [0, 1, 2, 3, 4, 5, 6].map(n);
+  if ([secs, fm, fx, fy, tm, tx, ty].some(v => v === null) || fm < 1 || tm < 1 || [fx, fy, tx, ty].some(v => v > 1000)) return null;
+  return { kind: 'flight', seconds: secs, from: { map: fm, x: fx / 10, y: fy / 10 }, to: { map: tm, x: tx / 10, y: ty / 10 } };
+}
+
 const q = s => '"' + clean(s, 50).replace(/"/g, "'") + '"';
 const quest = a => (a[1] ? `${q(a[1])} (${a[0]})` : `quest ${a[0]}`);
 
@@ -104,6 +112,10 @@ function describe(e) {
     case 'qready': return `${quest(a)} is ready to turn in`;
     case 'qdone': return `turned in ${quest(a)}`;
     case 'qdrop': return `abandoned or lost ${quest(a)}`;
+    case 'taxi': {
+      const t = taxiTrip(a);
+      return t ? `flew ${t.seconds} s from map ${t.from.map} (${t.from.x.toFixed(1)}, ${t.from.y.toFixed(1)}) to map ${t.to.map} (${t.to.x.toFixed(1)}, ${t.to.y.toFixed(1)})` : null;
+    }
     default: return null;
   }
 }
@@ -169,6 +181,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       mem.events.push(rec2);
       evLines.push(JSON.stringify(rec2));
       if (e.type === 'zone') mem.zones.push({ at: rec2.t, name: clean(e.args[1] || '', 50) });
+      if (e.type === 'taxi') { const trip = taxiTrip(e.args); if (trip) atlas.learn({ ...trip, t: rec2.t }); }
     }
     while (mem.events.length > RECENT_EVENTS) mem.events.shift();
     append('events.jsonl', evLines);

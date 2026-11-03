@@ -20,6 +20,7 @@ The addon tells the bridge what happens in the game: quests accepted, ready and 
 | `qaccept`, `qready` | the quest log gained a quest / a quest became complete | quest id, title |
 | `qdone` | `QUEST_TURNED_IN` | quest id, title |
 | `qdrop` | a quest left the log without being turned in | quest id, title |
+| `taxi` | a flight ended (10 s or longer) | seconds, from map and position, to map and position (see [DISTANCE.md](DISTANCE.md)) |
 | `tick` | nothing else was sent for 5 minutes (a heartbeat) | none |
 
 Quests are found by comparing the quest log with the last look (1.5 s after `QUEST_LOG_UPDATE` settles), so the same code works whatever arguments the client gives its quest events. The whole log goes out with a change as a `Q` line.

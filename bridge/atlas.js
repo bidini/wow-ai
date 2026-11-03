@@ -15,6 +15,10 @@ const MAX_MAPS = 2000;
 const MAX_CONTINENTS = 40;
 const FRACTION = 10000;      // map edges travel as ten-thousandths of the continent
 const MAX_YARDS = 100000;    // no continent is bigger than this
+const MAX_LEARNED = 200;
+const MIN_RIDE_SECONDS = 5;  // shorter is a glitch, not a ride
+const SAME_STOP_YARDS = 200; // two ends this close are the same flight master
+const SAME_STOP_PERCENT = 3; // fallback when the atlas cannot measure yards
 const WALK_SPEED = 7;        // yards per second on foot at level 1; callers pass the real speed
 
 const int = v => { if (v === undefined || v === null || v === '') return null; const n = Number(v); return Number.isInteger(n) ? n : null; };
@@ -60,10 +64,29 @@ function loadLinks(file, clean) {
   return out;
 }
 
+// Learned shortcuts keep their bookkeeping: how often they were flown and when.
+function loadLearned(file, clean) {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return []; }
+  const out = [];
+  for (const l of Array.isArray(raw && raw.links) ? raw.links : []) {
+    if (!validLink(l)) continue;
+    const kind = clean(l.kind || 'flight', 20).replace(/"/g, "'") || 'flight';
+    out.push({
+      kind, name: clean(l.name || '', 60).replace(/"/g, "'"),
+      from: { map: l.from.map, x: l.from.x, y: l.from.y }, to: { map: l.to.map, x: l.to.x, y: l.to.y },
+      seconds: Math.round(l.seconds), seen: Number.isInteger(l.seen) && l.seen > 0 ? l.seen : 1,
+      first: Number.isFinite(l.first) ? l.first : 0, last: Number.isFinite(l.last) ? l.last : 0,
+    });
+  }
+  return out.slice(-MAX_LEARNED);
+}
+
 function createAtlas({ dir, transportFile = '', clean, log = () => {} }) {
   const data = { continents: {}, maps: {} };
   const file = name => path.join(dir, name);
   const links = loadLinks(transportFile, clean);
+  const learned = loadLearned(path.join(dir, 'links-learned.json'), clean);
 
   try {
     const saved = JSON.parse(fs.readFileSync(file('maps.json'), 'utf8'));
@@ -110,6 +133,42 @@ function createAtlas({ dir, transportFile = '', clean, log = () => {} }) {
     return changed;
   }
 
+  // Two ends are the same stop when they are a flight master's width apart (200 yards), or, when the
+  // atlas cannot measure yards for them, on the same map within 3 percent.
+  function sameStop(a, b) {
+    const d = distance(a, b);
+    if (d !== null) return d <= SAME_STOP_YARDS;
+    return a.map === b.map && Math.abs(a.x - b.x) <= SAME_STOP_PERCENT && Math.abs(a.y - b.y) <= SAME_STOP_PERCENT;
+  }
+
+  // A trip made in game: { kind, from:{map,x,y}, to:{map,x,y}, seconds, t }. The newest ride of a route
+  // replaces the older time, so the figure follows the game. Returns 'added', 'updated' or null.
+  function learn(trip) {
+    const link = { kind: trip && trip.kind, name: '', from: trip && trip.from, to: trip && trip.to, seconds: trip && trip.seconds };
+    if (!validLink(link) || link.seconds < MIN_RIDE_SECONDS || sameStop(link.from, link.to)) return null;
+    const t = Number.isFinite(trip.t) ? trip.t : 0;
+    link.kind = clean(link.kind || 'flight', 20).replace(/"/g, "'") || 'flight';
+    link.seconds = Math.round(link.seconds);
+    const old = learned.find(l => l.kind === link.kind && sameStop(l.from, link.from) && sameStop(l.to, link.to));
+    let result;
+    if (old) {
+      old.seconds = link.seconds; old.seen++; old.last = t;
+      result = 'updated';
+    } else {
+      learned.push({ ...link, from: { ...link.from }, to: { ...link.to }, seen: 1, first: t, last: t });
+      while (learned.length > MAX_LEARNED) {
+        let oldest = 0;
+        for (let i = 1; i < learned.length; i++) if (learned[i].last < learned[oldest].last) oldest = i;
+        learned.splice(oldest, 1);
+      }
+      result = 'added';
+    }
+    writeAtomic('links-learned.json', JSON.stringify({ links: learned }, null, 1) + '\n');
+    writeAtomic('maps.txt', text());
+    log(`atlas: ${result} a ${link.kind} of ${link.seconds} s`);
+    return result;
+  }
+
   const known = () => Object.keys(data.maps).length;
 
   // A place (map, x%, y%) as yards on its continent, or null when the map or continent is unknown.
@@ -138,13 +197,19 @@ function createAtlas({ dir, transportFile = '', clean, log = () => {} }) {
     let best = null;
     const direct = distance(a, b);
     if (direct !== null) best = { seconds: direct / speed, via: null };
-    for (const l of links.concat(extraLinks)) {
+    for (const l of links.concat(learned, extraLinks)) {
       const d1 = distance(a, l.from), d2 = distance(l.to, b);
       if (d1 === null || d2 === null) continue;
       const s = d1 / speed + l.seconds + d2 / speed;
       if (!best || s < best.seconds) best = { seconds: s, via: l.name || l.kind };
     }
     return best;
+  }
+
+  function describeLink(l, note) {
+    const a = toContinent(l.from.map, l.from.x, l.from.y), b = toContinent(l.to.map, l.to.x, l.to.y);
+    const yards = p => (p ? `continent ${p.cont} ${Math.round(p.x)},${Math.round(p.y)}` : 'position unknown yet');
+    return `- ${l.kind}${l.name ? ` "${l.name}"` : ''}: map ${l.from.map} ${l.from.x},${l.from.y} (${yards(a)}) -> map ${l.to.map} ${l.to.x},${l.to.y} (${yards(b)}), ${l.seconds} s${note ? `, ${note}` : ''}`;
   }
 
   function text() {
@@ -170,11 +235,11 @@ function createAtlas({ dir, transportFile = '', clean, log = () => {} }) {
     }
     if (links.length) {
       out.push('', 'Shortcuts (one way; the ride takes the seconds shown, you still walk to the start and from the end):');
-      for (const l of links) {
-        const a = toContinent(l.from.map, l.from.x, l.from.y), b = toContinent(l.to.map, l.to.x, l.to.y);
-        const yards = p => (p ? `continent ${p.cont} ${Math.round(p.x)},${Math.round(p.y)}` : 'position unknown yet');
-        out.push(`- ${l.kind}${l.name ? ` "${l.name}"` : ''}: map ${l.from.map} ${l.from.x},${l.from.y} (${yards(a)}) -> map ${l.to.map} ${l.to.x},${l.to.y} (${yards(b)}), ${l.seconds} s${l.source ? `, source ${l.source}` : ''}`);
-      }
+      for (const l of links) out.push(describeLink(l, l.source ? `source ${l.source}` : ''));
+    }
+    if (learned.length) {
+      out.push('', 'Learned in game (measured on rides you made; the newest ride of a route replaces the older time):');
+      for (const l of learned) out.push(describeLink(l, `flown ${l.seen} time${l.seen === 1 ? '' : 's'}`));
     }
     return out.join('\n') + '\n';
   }
@@ -182,7 +247,7 @@ function createAtlas({ dir, transportFile = '', clean, log = () => {} }) {
   // Rewrite the text at startup so an edited data/transport.json shows up without waiting for a new map.
   if (known()) { try { writeAtomic('maps.txt', text()); } catch {} }
 
-  return { merge, toContinent, distance, seconds, text, known, links, data, file: file('maps.txt') };
+  return { merge, learn, toContinent, distance, seconds, text, known, links, learned, data, file: file('maps.txt') };
 }
 
 module.exports = { createAtlas, parseLine, loadLinks, WALK_SPEED };
