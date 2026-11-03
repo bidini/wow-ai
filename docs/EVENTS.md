@@ -41,7 +41,13 @@ E	t type args...                                       an event
 P	t map x10 y10                                        a position sample
 D	n                                                    n lines were dropped to fit
 K / W  continent size / where a map lies on it       the distance atlas, see DISTANCE.md
+H  race class faction                                the character, sent when it changes
+I  slot=itemID ...                                   equipped items, sent when they change
+R  skill=rank/max ...                                skills and professions, sent when they change
+A  gen i n spell=rank ...                            chunk i of n of the spells learned
 ```
+
+The `S` line also ends with your **gold** in copper.
 
 `t` is the game clock's Unix time; `x10`/`y10` are tenths of a percent of the map (0 to 1000); `cur` and `run` are yards per second (`GetUnitSpeed`). A batch is capped at 1200 bytes of payload; over that, the oldest position samples and then the oldest events are dropped and a `D` line says how many. Typical batches are 150 to 400 bytes: 3 to 6 rows of the strip, a sliver about 12 to 24 pixels tall.
 
@@ -66,6 +72,12 @@ The bridge writes them to `<default folder>/state/` (`feed.dir` in `config.json`
 
 The system prompt block names these files by absolute path, so an agent whose only file tools are Read, Grep and Glob can open the full history when the summary is not enough. It is labelled as data about the game, never instructions: quest and zone names come from the game client and are cleaned (control characters, backticks and quotes removed, 50 characters per title) before they reach a prompt or a file.
 
+## The character
+
+Besides what happens, the batches say who you are and what you have: **race, class and faction** (`H`), **gold** (the last field of every `S` line), **equipped items** by slot as item ids (`I`, 19 slots), **skills and professions** with rank and maximum (`R`), and **every spell learned**, highest rank of each (`A`). Gear, skills and spells are read when the game says they changed (equipment, spellbook and skill events, a level-up) and sent only if different from what was sent before; a new session sends them all again, 1 second after entering the world so they ride in the login batch. A spellbook is sent as a numbered set in chunks of 12 spells, two chunks to a batch; the bridge publishes a set only when every chunk of it has arrived, so a missed batch leaves the old list in place, and `/wow-ai feed info` sends everything again.
+
+The bridge keeps the whole picture in `snapshot.json` under `character` (race, class, faction, gold in copper, `equipped` by slot, `skills`, `spells`) and puts one line in the prompt, for example: `Character: Night Elf Hunter (Alliance), 12g 34s 56c, 9 items equipped, 61 spells, skills: Bows 46/115, Skinning 75/75, ...`. Item ids are numbers; the agent looks them up on Wowhead.
+
 ## The permanent daily log
 
 Next to the live files, the bridge keeps a log that is **never rotated and never removed**: one folder per calendar day (the Mac's local date), in `<state folder>/log/`:
@@ -73,13 +85,14 @@ Next to the live files, the bridge keeps a log that is **never rotated and never
 ```
 state/log/2026-11-04/events.jsonl      every event that day, appended (one JSON object per line)
 state/log/2026-11-04/trajectory.jsonl  the path that day: t, map, x, y
+state/log/2026-11-04/state.jsonl       the character over the day: level, zone, gold, equipped items (and skills and spells when new)
 state/log/2026-11-04/day.txt           a short overview: active hours, level range, zones, quests turned in, deaths, flights
 state/log/2026-11-04/day.json          the counts behind day.txt (the bridge's own bookkeeping)
 ```
 
 Several sessions on the same date append to the same files, even across bridge restarts; a new date starts a new folder. A batch that crosses midnight is split between the two days by each line's own time. The live files at the top of the folder keep their 2 MB rotation (they are what the current state is built from); the daily files are the history.
 
-The agent's prompt names this folder and lists the newest seven dates that have a log, so it knows it can look back: it reads a day's `day.txt` first (about 1 KB) and the `.jsonl` files only when the detail matters. About 100 KB a day, so a year is well under 50 MB. Turn it off with `"feed": { "dailyLog": false }`.
+`state.jsonl` gets a record for the first update of the day, then one every five minutes, and one at once when gear, skills, spells or the character change; the spell list is written only when it is new, so a record is about 450 bytes and a two-hour session about 11 KB. The agent's prompt names this folder and lists the newest seven dates that have a log, so it knows it can look back: it reads a day's `day.txt` first (about 1 KB) and the `.jsonl` files only when the detail matters. About 100 KB a day, so a year is well under 50 MB. Turn it off with `"feed": { "dailyLog": false }`.
 
 ## Configuration
 
