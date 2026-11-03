@@ -127,6 +127,7 @@ Right-clicking a chat in the left panel opens a small menu with **Rename...**, *
 | `/wow-ai cd <folder>` | folder this chat's agent works in (**Folder...** after right-clicking the chat opens the same thing as a dialog). Relative to the bridge's folder (`/wow-ai cd realms`, `/wow-ai cd ../other`), `~` works, a full path too; `/wow-ai cd` alone goes back to the bridge's default. A chat that changes folder starts a fresh session there |
 | `/wow-ai reset` | wipe this chat's agent memory, keep the transcript |
 | `/wow-ai context [on\|off]` | show what the agent is told about your character and location, or turn it on/off |
+| `/wow-ai code [load <slot>\|stop <name\|all>\|on\|off]` | run addon code the agent offered and the bridge accepted; nothing runs until you load it (off by default, [docs/CODE.md](docs/CODE.md)) |
 | `/wow-ai feed [on\|off\|atlas\|hold <s>\|shows <n>]` | the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status) |
 | `/wow-ai rename`, `/wow-ai delete`, `/wow-ai clear` | manage the current chat |
 | `/wow-ai echo summary\|full\|short\|off\|<chars>` | how much of each reply to print into the game chat. `summary` (the default) prints only the agent's closing TL;DR lines, the full reply is in the window behind `[open]`; `full` prints up to 4000 chars, `short` one preview line |
@@ -231,6 +232,7 @@ The keys you are most likely to touch. Every key, flag and environment variable 
 - [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md): Linux + Wine install, and how to check the screen capture
 - [docs/MAP.md](docs/MAP.md): map layers, the navigator and herb/ore nodes
 - [docs/EVENTS.md](docs/EVENTS.md): the event feed: what the addon reports, the files the agent reads, and how it is tested
+- [docs/CODE.md](docs/CODE.md): agent-written addon code: the allowlist checker, the slots, the runtime environment, and why you load every piece yourself
 - [docs/DISTANCE.md](docs/DISTANCE.md): the distance index: map sizes in yards, `maps.txt`, shortcuts in `data/transport.json`, and how it is tested
 - [CONTRIBUTING.md](CONTRIBUTING.md): repo layout, running the tests, conventions
 - [CHANGELOG.md](CHANGELOG.md): release notes

@@ -23,7 +23,7 @@ const payload = (extra = []) => [
 
 function sandbox(feedCfg) {
   const S = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-bridge-'));
-  for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
+  for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js', 'code.js', 'lint.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
   fs.mkdirSync(path.join(S, 'addons', 'WoWAI'), { recursive: true });
   fs.mkdirSync(path.join(S, 'proj'), { recursive: true });
   const cfg = JSON.parse(fs.readFileSync(path.join(SRC, 'config.example.json'), 'utf8'));

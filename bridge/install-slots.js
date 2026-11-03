@@ -49,6 +49,25 @@ for (let i = 1; i <= N; i++) {
   }
 }
 
+// Code slots: load-on-demand data holders for agent code the bridge has checked (docs/CODE.md).
+// They stay unloaded, and empty, until the player types /wow-ai code load <slot>.
+const CODE_SLOTS = cfg.code && Number.isInteger(cfg.code.slots) ? cfg.code.slots : 20;
+for (let i = 1; i <= CODE_SLOTS; i++) {
+  const name = 'WoWAI_C' + String(i).padStart(2, '0');
+  const dir = path.join(addons, name);
+  ensure(path.join(dir, name + '.toc'), [
+    '## Interface: ' + iface,
+    '## Title: WoW AI code slot ' + String(i).padStart(2, '0'),
+    '## Notes: Holds code the agent offered. Load-on-demand; it only loads when you type /wow-ai code load ' + i + '.',
+    '## LoadOnDemand: 1',
+    '## Dependencies: WoWAI',
+    '',
+    'Code.lua',
+    '',
+  ].join('\n'));
+  ensure(path.join(dir, 'Code.lua'), 'WoWAI_CodeSlot = nil\n');
+}
+
 // Presence files: the bridge flips one every 30 s so the game can show "connected".
 for (let k = 1; k <= PRESENCE; k++) {
   ensure(path.join(addons, 'WoWAI', 'presence', String(k).padStart(4, '0') + '.wav'), '');

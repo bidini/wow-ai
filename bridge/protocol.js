@@ -216,8 +216,18 @@ const MACRO_HINT = [
   'The addon shows the player a button that creates the macro (or updates one with the same name) and puts it on their cursor. Explain outside the block what it does. Avoid /run and /script unless asked; the player is warned about them.',
 ];
 
+// How the agent offers the player a small addon (only when `code.enabled` in the config; see docs/CODE.md).
+function codeHint(vocabulary) {
+  return [
+    'When the player asks for a small addon or UI element, you may write it as a fenced block whose language tag is wowcode followed by a short name (lowercase letters, digits, - or _), with the Lua inside. The bridge checks it against a strict list of read-and-draw functions and, if it passes, puts it where the player can load it with one command. They read your code first and load it themselves; it never starts on its own. Explain outside the block what it does and how to stop it.',
+    String(vocabulary || '').trim(),
+    'If the checker refuses a block, the reply says why; fix that line and offer the block again. Do not try to get around the list: the code is only allowed to read and draw, never to act for the player.',
+  ].filter(Boolean).join('\n');
+}
+
 // `feed` is the live-game summary from feed.js (empty when no events have arrived).
-function systemPrompt(ctx, primer, feed) {
+// `code` is codeHint() text, or empty when the code pool is off.
+function systemPrompt(ctx, primer, feed, code) {
   const lines = [...REPLY_FORMAT];
   const live = String(feed || '').trim();
   if (live) lines.push('', live);
@@ -232,6 +242,8 @@ function systemPrompt(ctx, primer, feed) {
       ...MAP_HINT,
       '',
       ...MACRO_HINT);
+    const c = String(code || '').trim();
+    if (c) lines.push('', c);
   }
   const ref = text ? String(primer || '').trim() : '';
   if (ref) {
@@ -558,5 +570,5 @@ module.exports = {
   ruleFor, describeToolUse,
   luaStr, luaTable, SILENT_WAV,
   MAP_LIMITS, validateMapCommand, newMap, applyMapCommands, extractMapBlocks, parseMapFile, luaMap,
-  MACRO_LIMITS, extractMacros, stripMacroBlocks, luaMacros,
+  MACRO_LIMITS, codeHint, extractMacros, stripMacroBlocks, luaMacros,
 };

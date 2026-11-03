@@ -2833,6 +2833,7 @@ local HELP = table.concat({
 	"/wow-ai agent [name]           which agent this chat talks to (no name = show; default = the bridge's). Right-clicking the chat and picking Agent does the same",
 	"/wow-ai reset                  next message in this chat starts a fresh agent session",
 	"/wow-ai context [on|off]       what the agent is told about your character and where you are (no argument = show it)",
+	"/wow-ai code [load <slot>|stop <name|all>|on|off]   run addon code the agent offered and the bridge accepted; nothing runs until you load it, and never at login (no argument = status)",
 	"/wow-ai feed [on|off|atlas|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
 	"/wow-ai map [...]              map layers the agent drew, the route navigator and herb/ore nodes (no argument = status and subcommands; /aimap is the same)",
 	"/wow-ai mode pixel             no-reload transport (default)",
@@ -2878,6 +2879,7 @@ local COMMAND_ARGS = {
 	chat = ChatArgument, chats = ChatArgument,
 	cd = true, new = true, rename = true,
 	feed = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest == "atlas" or rest:match("^hold %d+%.?%d*$") ~= nil or rest:match("^shows %d$") ~= nil end,
+	code = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest:match("^load %d+$") ~= nil or rest:match("^stop [%w%-_]+$") ~= nil end, -- Code.lua
 	map = true, -- /wow-ai map ...: Map.lua (layers, navigator, herb/ore nodes)
 	macro = { undo = true }, -- /wow-ai macro undo; "/ai macro for my warrior" still goes to the agent
 }
@@ -2956,6 +2958,8 @@ SlashCmdList["WOWAI"] = function(msg)
 		WoWAI.Toggle(true)
 	elseif cmd == "feed" then
 		if WoWAIFeed then WoWAIFeed.Command(rest) else print("|cff66ccff[WoW AI]|r the event feed module did not load") end
+	elseif cmd == "code" then
+		if WoWAICode then WoWAICode.Command(rest) else print("|cff66ccff[WoW AI]|r the code module did not load") end
 	elseif cmd == "map" then
 		if WoWAIMap then WoWAIMap.Command(rest) else print("|cff66ccff[WoW AI]|r the map module did not load") end
 	elseif cmd == "agent" then
