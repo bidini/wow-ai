@@ -30,6 +30,8 @@ const readline = require('readline');
 const { spawn } = require('child_process');
 const P = require('./protocol'); // the pure protocol code, unit-tested in tests/bridge_test.js
 const A = require('./agents');   // how each agent is launched and read, unit-tested in tests/agents_test.js
+const Code = require('./code');  // agent-proposed addon code: checked, put in a slot for the player to load (docs/CODE.md)
+const Lint = require('./lint');
 const Feed = require('./feed');  // the event feed: files and a prompt summary built from what the addon reports (docs/EVENTS.md)
 
 const HERE = __dirname;
@@ -110,6 +112,7 @@ let state = readJson(STATE_FILE, { lastId: 0, sessions: {}, handled: {} });
 if (!state.handled) state.handled = {};
 if (!state.sessions) state.sessions = {};
 if (!state.feed) state.feed = {};
+if (!state.code) state.code = {};
 // Older versions stored handled[session] as "highest id so far"; expand to a map.
 for (const [k, v] of Object.entries(state.handled)) {
   if (typeof v === 'number') {
@@ -127,6 +130,15 @@ const FEED_DIR = path.resolve(FEED_CFG.dir || path.join(DEFAULT_CWD, 'state'));
 const feed = FEED_CFG.enabled === false ? null
   : Feed.createFeed({ dir: FEED_DIR, store: state.feed, log: (...a) => log(...a), maxFileBytes: FEED_CFG.maxFileBytes,
       transportFile: path.resolve(FEED_CFG.transportFile || path.join(__dirname, '..', 'data', 'transport.json')) });
+
+// Agent-proposed addon code (docs/CODE.md). Off unless "code": { "enabled": true } is set: the agent
+// is not told about it and wowcode blocks in replies are left alone. Even when on, the bridge only writes
+// checked code into an unloaded slot addon; the player loads it in the game, by hand, each session.
+const CODE_CFG = Object.assign({ enabled: false, slots: 20, maxBytes: Lint.LIMITS.maxBytes }, cfg.code || {});
+const codePool = CODE_CFG.enabled === true
+  ? Code.createPool({ addonDir: cfg.addonDir, auditDir: path.join(FEED_DIR, 'code'), store: state.code, slots: CODE_CFG.slots, maxBytes: CODE_CFG.maxBytes, log: (...a) => log(...a) })
+  : null;
+const CODE_HINT = codePool ? P.codeHint(Lint.describe()) : '';
 
 // Bridge-side transcripts. The beta client sometimes wipes addon saved data; since
 // every prompt and reply passes through here, this copy lets the addon recover.
@@ -563,8 +575,8 @@ function runJob(job) {
 
   const ctx = gameContext();
   const liveFeed = feed ? feed.block() : '';
-  const system = P.systemPrompt(ctx, primer(), liveFeed);
-  const systemShort = P.systemPrompt(ctx, '', liveFeed);
+  const system = P.systemPrompt(ctx, primer(), liveFeed, CODE_HINT);
+  const systemShort = P.systemPrompt(ctx, '', liveFeed, CODE_HINT);
   const promptFile = path.join(TMP_DIR, `prompt-${job.id}-${Date.now().toString(36)}.txt`);
   const input = agent.input({ prompt: job.text, system, systemShort, resume, cfg: acfg });
   if (input.promptFile !== undefined) {
@@ -720,6 +732,11 @@ function finish(job, status, text, session, denied) {
     text = m.text + (m.notes.length ? `\n\n[bridge] ${m.notes.join('; ')}` : '');
     macros = m.macros;
     summary = P.stripMacroBlocks(summary);
+    if (codePool) {
+      const c = codePool.process(text);
+      text = c.text + (c.notes.length ? `\n\n[bridge] ${c.notes.join('\n\n[bridge] ')}` : '');
+      if (c.results.some(r => r.ok)) saveState();
+    }
   }
   noteMessage(job, status === 'done' ? 'assistant' : 'system', status === 'done' ? text : 'Bridge error: ' + text);
   publish(chatKey(job), { chat: job.chat, id: job.id, status, text, summary, cwd: job.cwd, session, denied, macros, agent: job.agent || '' }, true);
@@ -812,6 +829,7 @@ function banner() {
   const ctx = gameContext();
   console.log(`  context  : ${cfg.gameContext === false ? 'off (gameContext in config.json)' : ctx ? (ctx.split('\n').find(l => /^Character:/i.test(l)) || ctx.split('\n')[0]).slice(0, 100) : 'none yet (the addon sends it with its hello; /wow-ai context in game)'}`);
   console.log(`  feed     : ${feed ? FEED_DIR + (feed.state.lastRx ? ' (last update ' + Feed.ago(Date.now() - feed.state.lastRx) + ' ago)' : ' (nothing received yet)') : 'off (feed.enabled in config.json)'}`);
+  console.log(`  code     : ${codePool ? 'on, ' + CODE_CFG.slots + ' slots (the player loads each piece by hand; audit trail in ' + path.join(FEED_DIR, 'code') + ')' : 'off (code.enabled in config.json)'}`);
   console.log(`  primer   : ${!PRIMER_FILE ? 'off (primerFile in config.json)' : primer() ? path.resolve(REPO, PRIMER_FILE) + ' (' + primer().length + ' chars, with the context)' : 'NOT FOUND: ' + path.resolve(REPO, PRIMER_FILE)}`);
   console.log('Leave this window open while you play. Ctrl+C to stop.\n');
 }
