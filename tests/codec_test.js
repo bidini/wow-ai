@@ -97,6 +97,8 @@ const cases = [
   // Event-feed batches (docs/EVENTS.md): tabs, newlines, accents, and a typical and a full-size payload.
   { id: 12, payload: 'sess1\x1F\x1F12\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tForêt d\'Elwynn\tGoldshire\t0\t10\t100', 'Q\t176*\t33', 'E\t1700000001\tqaccept\t33\tLoups à la frontière', 'P\t1700000002\t1429\t421\t659'].join('\n'), jitter: 40, gamma: 1.3 },
   { id: 13, payload: 'sess1\x1F\x1F13\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100'].concat(Array.from({ length: 40 }, (_, i) => 'E\t' + (1700000000 + i) + '\tqaccept\t' + i + '\tQuest number ' + i)).concat(Array.from({ length: 20 }, (_, i) => 'P\t' + (1700000100 + i) + '\t1429\t' + (400 + i) + '\t' + (600 + i))).join('\n'), jitter: 90, gamma: 0.8 },
+  // A batch with the atlas lines of docs/DISTANCE.md (a continent size and 8 zone maps).
+  { id: 14, payload: 'sess1\x1F\x1F14\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100', 'K\t0\t40000\t30000'].concat(Array.from({ length: 8 }, (_, i) => 'W\t' + (1429 + i) + '\t0\t' + (3000 + i * 10) + '\t' + (3500 + i * 10) + '\t7000\t7500\tZone ' + i + ' Forêt')).join('\n'), jitter: 70, gamma: 1.2 },
 ];
 
 let pass = 0, total = 0;

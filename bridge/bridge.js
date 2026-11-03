@@ -122,10 +122,11 @@ for (const [k, v] of Object.entries(state.handled)) {
 // The event feed (docs/EVENTS.md): files in <default folder>/state that the agent can Read,
 // plus a short summary in its system prompt. "feed": { "enabled": false } turns it off;
 // "dir" moves the files. Events never start an agent run.
-const FEED_CFG = Object.assign({ enabled: true, dir: '', maxFileBytes: 2000000 }, cfg.feed || {});
+const FEED_CFG = Object.assign({ enabled: true, dir: '', maxFileBytes: 2000000, transportFile: '' }, cfg.feed || {});
 const FEED_DIR = path.resolve(FEED_CFG.dir || path.join(DEFAULT_CWD, 'state'));
 const feed = FEED_CFG.enabled === false ? null
-  : Feed.createFeed({ dir: FEED_DIR, store: state.feed, log: (...a) => log(...a), maxFileBytes: FEED_CFG.maxFileBytes });
+  : Feed.createFeed({ dir: FEED_DIR, store: state.feed, log: (...a) => log(...a), maxFileBytes: FEED_CFG.maxFileBytes,
+      transportFile: path.resolve(FEED_CFG.transportFile || path.join(__dirname, '..', 'data', 'transport.json')) });
 
 // Bridge-side transcripts. The beta client sometimes wipes addon saved data; since
 // every prompt and reply passes through here, this copy lets the addon recover.

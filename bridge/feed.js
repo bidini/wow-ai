@@ -8,6 +8,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { createAtlas, parseLine: parseAtlasLine } = require('./atlas');
 
 const MAX_FIELD = 80;
 const MAX_LINES = 400;        // sanity limit per payload
@@ -59,6 +60,14 @@ function parsePayload(text) {
       }
       case 'P': out.samples.push({ t: int(f[1]), m: int(f[2]), x: percent(f[3]), y: percent(f[4]) }); break;
       case 'D': out.dropped += int(f[1]) || 0; break;
+      case 'K': case 'W': {
+        // Atlas lines (docs/DISTANCE.md). The key exists only when a batch carries some.
+        const a = parseAtlasLine(f, clean);
+        if (!a) { out.unknown++; break; }
+        out.atlas = out.atlas || { continents: [], maps: [] };
+        if (a.continent) out.atlas.continents.push(a.continent); else out.atlas.maps.push(a.map);
+        break;
+      }
       default: out.unknown++;
     }
   }
@@ -99,8 +108,9 @@ function describe(e) {
   }
 }
 
-function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), maxFileBytes = 2000000 }) {
-  const mem = { snapshot: null, quests: { active: [], ready: [] }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
+function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), maxFileBytes = 2000000, transportFile = '' }) {
+  const atlas = createAtlas({ dir, transportFile, clean, log });
+  const mem ={ snapshot: null, quests: { active: [], ready: [] }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
 
   const file = name => path.join(dir, name);
   function ensureDir() { fs.mkdirSync(dir, { recursive: true, mode: 0o755 }); }
@@ -151,6 +161,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
     mem.lastRx = rx; mem.session = session; mem.batches++;
     if (p.snapshot) mem.snapshot = { ...p.snapshot, rx };
     if (p.quests) mem.quests = p.quests;
+    if (p.atlas) atlas.merge(p.atlas);
 
     const evLines = [];
     for (const e of p.events) {
@@ -188,7 +199,10 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
     const s = mem.snapshot;
     if (s) {
       const where = [s.zone, s.subzone && s.subzone !== s.zone ? s.subzone : ''].filter(Boolean).join(' - ') || 'unknown place';
-      const pos = s.x !== null && s.y !== null ? ` at ${s.x.toFixed(1)}, ${s.y.toFixed(1)} on map ${s.map}` : ' (no map position, maybe an instance)';
+      const yards = s.x !== null && s.y !== null ? atlas.toContinent(s.map, s.x, s.y) : null;
+      const pos = s.x !== null && s.y !== null
+        ? ` at ${s.x.toFixed(1)}, ${s.y.toFixed(1)} on map ${s.map}${yards ? ` (continent ${yards.cont}, ${Math.round(yards.x)},${Math.round(yards.y)} yards)` : ''}`
+        : ' (no map position, maybe an instance)';
       const speed = s.speed && s.speed.run ? `. Run speed ${s.speed.run} yards/s${s.speed.current !== null && s.speed.current !== s.speed.run ? ` (moving at ${s.speed.current})` : ''}` : '';
       const xp = s.xp !== null && s.xpMax ? `. XP ${s.xp}/${s.xpMax}` : '';
       lines.push(`Now: level ${s.level ?? '?'}, ${where}${pos}${s.dead ? '. DEAD' : ''}${speed}${xp}.`);
@@ -228,10 +242,11 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       mem.lastRx ? `Last update ${ago(age)} ago${age > 10 * 60000 ? ' (the game may be closed or the feed off)' : ''}; the addon sends changes and a position sample about every 10 s while moving, so the position can be a little behind.` : '',
       body,
       `More, if you need it (Read these files; one JSON object per line): ${file('snapshot.json')}, ${file('events.jsonl')}, ${file('trajectory.jsonl')}`,
+      atlas.known() ? `Distances: ${atlas.file} lists where each map lies on its continent in yards, with the method; a place given as map, x%, y% becomes yards, and seconds = yards / run speed.` : '',
     ].filter(Boolean).join('\n');
   }
 
-  return { ingest, summary, block, state: mem, dir };
+  return { ingest, summary, block, state: mem, dir, atlas };
 }
 
 module.exports = { createFeed, parsePayload, clean, describe, ago };

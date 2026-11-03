@@ -2833,7 +2833,7 @@ local HELP = table.concat({
 	"/wow-ai agent [name]           which agent this chat talks to (no name = show; default = the bridge's). Right-clicking the chat and picking Agent does the same",
 	"/wow-ai reset                  next message in this chat starts a fresh agent session",
 	"/wow-ai context [on|off]       what the agent is told about your character and where you are (no argument = show it)",
-	"/wow-ai feed [on|off|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
+	"/wow-ai feed [on|off|atlas|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
 	"/wow-ai map [...]              map layers the agent drew, the route navigator and herb/ore nodes (no argument = status and subcommands; /aimap is the same)",
 	"/wow-ai mode pixel             no-reload transport (default)",
 	"/wow-ai mode reload            fallback transport: a /reload per step",
@@ -2877,7 +2877,7 @@ local COMMAND_ARGS = {
 	bind = 1, agent = 1,
 	chat = ChatArgument, chats = ChatArgument,
 	cd = true, new = true, rename = true,
-	feed = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest:match("^hold %d+%.?%d*$") ~= nil or rest:match("^shows %d$") ~= nil end,
+	feed = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest == "atlas" or rest:match("^hold %d+%.?%d*$") ~= nil or rest:match("^shows %d$") ~= nil end,
 	map = true, -- /wow-ai map ...: Map.lua (layers, navigator, herb/ore nodes)
 	macro = { undo = true }, -- /wow-ai macro undo; "/ai macro for my warrior" still goes to the agent
 }

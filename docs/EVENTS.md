@@ -39,6 +39,7 @@ Q	176	33*	54                                       whole quest log; * = ready to
 E	t type args...                                       an event
 P	t map x10 y10                                        a position sample
 D	n                                                    n lines were dropped to fit
+K / W  continent size / where a map lies on it       the distance atlas, see DISTANCE.md
 ```
 
 `t` is the game clock's Unix time; `x10`/`y10` are tenths of a percent of the map (0 to 1000); `cur` and `run` are yards per second (`GetUnitSpeed`). A batch is capped at 1200 bytes of payload; over that, the oldest position samples and then the oldest events are dropped and a `D` line says how many. Typical batches are 150 to 400 bytes: 3 to 6 rows of the strip, a sliver about 12 to 24 pixels tall.
@@ -49,7 +50,7 @@ Messages leave the strip when the bridge raises an `ack/NNN.wav` file. Events do
 
 A batch is only shown while the bridge is known to be alive (the same test the Send button uses), and one that has waited 2 minutes without that is dropped. It shares the strip with your messages: a message is always drawn first, and the batch is left out when the two do not fit together.
 
-Tune it in game: `/wow-ai feed hold <seconds>` (default 2) and `/wow-ai feed shows <n>` (default 2), `/wow-ai feed off`, and `/wow-ai feed` for counts and the last error.
+Tune it in game: `/wow-ai feed hold <seconds>` (default 2) and `/wow-ai feed shows <n>` (default 2), `/wow-ai feed off`, `/wow-ai feed atlas` (send the map atlas again), and `/wow-ai feed` for counts and the last error.
 
 ## Files the agent reads
 
@@ -77,6 +78,7 @@ The system prompt block names these files by absolute path, so an agent whose on
 - `tests/feed_test.js`: payload parsing, files and permissions, repeats, restarts, size limits, prompt wording.
 - `tests/feed_addon_test.js`: the real `Feed.lua` and `WoWAI.lua` in a Lua VM: events, quests, position, priority over messages, then the decoded strip through the bridge's parser and feed (addon to files).
 - `tests/feed_bridge_test.js`: the real `bridge.js` in a scratch folder.
+- `tests/atlas_test.js`: the distance atlas ([DISTANCE.md](DISTANCE.md)).
 - `tests/codec_test.js`: feed batches drawn to a PNG and read back by the Python capture decoders with noise and gamma.
 - `node bridge/bridge.js --inject-feed payload.txt [--feed-id 5]` feeds a saved payload through the bridge's intake and exits, for trying the files and the summary by hand.
 

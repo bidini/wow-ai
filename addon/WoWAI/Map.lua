@@ -111,6 +111,9 @@ local function ContinentYards(cont)
 	return w, h
 end
 
+-- Used by Feed.lua to describe where each map lies on its continent (docs/DISTANCE.md).
+M.ContinentOf, M.ContinentYards = ContinentOf, ContinentYards
+
 -- The player's position as (continent, cx, cy) in continent map space.
 local function PlayerOnContinent()
 	local mapID = Try(C_Map.GetBestMapForUnit, "player")

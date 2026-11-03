@@ -12,6 +12,8 @@
 --   E t type args...                      an event
 --   P t map x10 y10                       a position sample (x10 = tenths of a percent)
 --   D n                                   n lines were dropped to fit
+--   K cont w h                            continent size in yards (docs/DISTANCE.md)
+--   W map cont minX maxX minY maxY name   where a map lies on its continent, in ten-thousandths
 -- No ack files are used: a batch is shown for HOLD seconds, SHOWS times, and the bridge
 -- ignores repeats. Every batch carries a full snapshot, so a missed one costs history
 -- only, never the current state.
@@ -35,10 +37,15 @@ local MAX_SAMPLES = 60
 local STALE_OUT = 120      -- give up on a batch the bridge never got a chance to see
 local QUEST_DELAY = 1.5
 local MOVE_EPS = 0.0004    -- map fraction; smaller moves are not new samples
+local ATLAS_PER_BATCH = 8   -- maps described per batch
+local ATLAS_BYTES = 760     -- atlas lines only fill what the other head lines leave under this
+local ATLAS_QUEUE = 120
+local ATLAS_SCALE = 10000
+local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
 local US = "\31"
 
 local F = {
-	pending = {}, samples = {}, turned = {},
+	pending = {}, samples = {}, turned = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {},
 	stats = { built = 0, sent = 0, dropped = 0, errors = 0 },
 }
 
@@ -221,6 +228,86 @@ local function QLine()
 end
 
 ---------------------------------------------------------------------------
+-- Atlas: where each map lies on its continent (docs/DISTANCE.md)
+---------------------------------------------------------------------------
+
+local function AtlasAdd(mapID, cont)
+	if type(mapID) ~= "number" or F.atlasSent[mapID] or F.atlasKnown[mapID] then return end
+	if #F.atlasQueue >= ATLAS_QUEUE then return end
+	F.atlasKnown[mapID] = true
+	F.atlasQueue[#F.atlasQueue + 1] = { map = mapID, cont = cont }
+end
+
+-- Queue the current map and every zone map of its continent that has not been sent this session.
+local function QueueAtlas()
+	local m = Try(C_Map and C_Map.GetBestMapForUnit, "player")
+	local Map = WoWAIMap
+	if type(m) ~= "number" or not Map or not Map.ContinentOf then return end
+	local cont = Try(Map.ContinentOf, m)
+	if type(cont) ~= "number" then return end
+	AtlasAdd(m, cont)
+	local kids = Try(C_Map.GetMapChildrenInfo, cont, ZONE, true)
+	if type(kids) == "table" then
+		for _, info in ipairs(kids) do
+			if type(info) == "table" then AtlasAdd(info.mapID, cont) end
+		end
+	end
+	if #F.atlasQueue > 0 then
+		local at = GetTime() + DEBOUNCE
+		if not F.flushAt or at < F.flushAt then F.flushAt = at end
+	end
+end
+
+-- The K / W lines for one queued map, or nothing when the client cannot place it.
+local function AtlasLines(item)
+	local lines = {}
+	if not F.atlasSent["k" .. item.cont] then
+		local w, h = Try(WoWAIMap.ContinentYards, item.cont)
+		if type(w) ~= "number" or type(h) ~= "number" or w < 1 or h < 1 then return nil end
+		lines[#lines + 1] = table.concat({ "K", item.cont, math.floor(w + 0.5), math.floor(h + 0.5) }, "\t")
+	end
+	local minX, maxX, minY, maxY = Try(C_Map.GetMapRectOnMap, item.map, item.cont)
+	if type(minX) ~= "number" or type(maxX) ~= "number" or type(minY) ~= "number" or type(maxY) ~= "number"
+		or maxX <= minX or maxY <= minY then return nil end
+	local info = Try(C_Map.GetMapInfo, item.map)
+	local name = type(info) == "table" and info.name or ""
+	local function T(v) return math.max(0, math.min(ATLAS_SCALE, math.floor(v * ATLAS_SCALE + 0.5))) end
+	lines[#lines + 1] = table.concat({ "W", item.map, item.cont, T(minX), T(maxX), T(minY), T(maxY), Clean(name, 30) }, "\t")
+	return lines
+end
+
+-- Take queued maps while there is room; returns the lines and marks them sent.
+local function DrainAtlas(headSize)
+	local out, count = {}, 0
+	local size = headSize
+	while #F.atlasQueue > 0 and count < ATLAS_PER_BATCH do
+		local item = table.remove(F.atlasQueue, 1)
+		F.atlasKnown[item.map] = nil
+		local lines = AtlasLines(item)
+		if lines then
+			local add = 0
+			for _, l in ipairs(lines) do add = add + #l + 1 end
+			if size + add > ATLAS_BYTES and count > 0 then
+				table.insert(F.atlasQueue, 1, item)      -- no room now; next batch
+				F.atlasKnown[item.map] = true
+				break
+			end
+			if size + add > ATLAS_BYTES and count == 0 and size > ATLAS_BYTES - 80 then
+				table.insert(F.atlasQueue, 1, item)      -- the other lines took the room; wait
+				F.atlasKnown[item.map] = true
+				break
+			end
+			for _, l in ipairs(lines) do out[#out + 1] = l end
+			size = size + add
+			count = count + 1
+			F.atlasSent[item.map] = true
+			F.atlasSent["k" .. item.cont] = true
+		end
+	end
+	return out
+end
+
+---------------------------------------------------------------------------
 -- Sending
 ---------------------------------------------------------------------------
 
@@ -232,6 +319,15 @@ local function Build()
 	if F.qline and F.quests then
 		head[#head + 1] = QLine()
 		F.qline = false
+	end
+	do
+		local headSize = 0
+		for _, l in ipairs(head) do headSize = headSize + #l + 1 end
+		for _, l in ipairs(DrainAtlas(headSize)) do head[#head + 1] = l end
+		if #F.atlasQueue > 0 then
+			local at = GetTime() + DEBOUNCE
+			if not F.flushAt or at < F.flushAt then F.flushAt = at end
+		end
 	end
 	local ev, sm = F.pending, F.samples
 	local function size()
@@ -260,6 +356,7 @@ local function Build()
 	local wire = table.concat({ Wire(db.session), "", tostring(db.feedSeq), "", "e", "", payload }, US)
 	F.out = { seq = db.feedSeq, wire = wire, shows = 0, nextAt = now, createdAt = now, bytes = #payload }
 	F.pending, F.samples, F.flushAt = {}, {}, nil
+	if #F.atlasQueue > 0 then F.flushAt = now + DEBOUNCE end
 	F.lastBuild = now
 	F.stats.built = F.stats.built + 1
 end
@@ -302,7 +399,7 @@ function M.Tick()
 	if not F.out then
 		if now - (F.lastBuild or now) >= HEARTBEAT and #F.pending == 0 then Event("tick") end
 		local due = (F.flushAt and now >= F.flushAt) or #F.samples >= FLUSH_SAMPLES
-		if due and (#F.pending > 0 or #F.samples > 0) then Build() end
+		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0) then Build() end
 	end
 	o = F.out
 	if o and not o.showing and o.shows < Shows() and now >= o.nextAt and WoWAI.IsConnected() then
@@ -330,12 +427,14 @@ function M.OnEvent(event, a1, a2)
 		if a1 or a2 then Event("login", a1 and "initial" or "reload") end
 		F.questCheckAt = GetTime() + 3
 		F.zone, F.sub = Try(GetZoneText), Try(GetSubZoneText)
+		QueueAtlas()
 	elseif event == "ZONE_CHANGED_NEW_AREA" then
 		local zone = Try(GetZoneText) or ""
 		local m = Try(C_Map and C_Map.GetBestMapForUnit, "player")
 		if zone ~= F.zone then Event("zone", m or "", zone) end
 		F.zone = zone
 		F.sub = Try(GetSubZoneText)
+		QueueAtlas()
 	elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" then
 		local sub = Try(GetSubZoneText) or ""
 		if sub ~= "" and sub ~= F.sub then Event("sub", sub) end
@@ -385,6 +484,7 @@ function M.Status()
 		enabled = Enabled(), built = F.stats.built, sent = F.stats.sent, dropped = F.stats.dropped, errors = F.stats.errors,
 		pending = #F.pending, samples = #F.samples, seq = WoWAIDB and WoWAIDB.feedSeq or 0, lastError = F.lastError,
 		hold = Hold(), shows = Shows(), showing = F.out ~= nil and F.out.showing or false, waiting = F.out ~= nil,
+		atlasQueued = #F.atlasQueue,
 	}
 end
 
@@ -397,6 +497,10 @@ function M.Command(rest)
 	if rest == "on" or rest == "off" then
 		s.feed = rest == "on"
 		say("event feed " .. rest)
+	elseif rest == "atlas" then
+		F.atlasSent, F.atlasKnown, F.atlasQueue = {}, {}, {}
+		QueueAtlas()
+		say(string.format("map atlas: %d map(s) queued for the bridge", #F.atlasQueue))
 	elseif arg == "hold" and tonumber(val) then
 		s.feedHold = tonumber(val)
 		say("each batch stays on the strip " .. Hold() .. " s per show")
@@ -408,6 +512,6 @@ function M.Command(rest)
 		say(string.format("event feed %s: %d batch(es) built, %d fully shown, %d line(s) dropped, %d waiting (%d position samples), last number %d%s",
 			st.enabled and "ON" or "OFF", st.built, st.sent, st.dropped, st.pending, st.samples, st.seq,
 			st.errors > 0 and (", " .. st.errors .. " error(s): " .. tostring(st.lastError)) or ""))
-		say(string.format("shows: %d x %.1f s. /wow-ai feed on|off, /wow-ai feed hold <seconds>, /wow-ai feed shows <n>", st.shows, st.hold))
+		say(string.format("shows: %d x %.1f s. /wow-ai feed on|off|atlas, /wow-ai feed hold <seconds>, /wow-ai feed shows <n>", st.shows, st.hold))
 	end
 end
