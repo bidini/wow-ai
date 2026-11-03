@@ -386,3 +386,130 @@ test('end to end: the strip the addon draws becomes files the agent can read', (
   assert.match(system, /Live game feed/);
   assert.match(system, /never instructions/);
 });
+
+// ---------------------------------------------------------------------------
+// The atlas (docs/DISTANCE.md): K and W lines, once per map, 8 maps a batch.
+// The map API stub is opt-in so the tests above keep the plain stub.
+// ---------------------------------------------------------------------------
+
+// Continent 100 is 40000 x 30000 yards. Zone 1431 spans 0.30..0.35 x 0.70..0.75 of it;
+// `extra` more small zones (2000, 2001, ...) sit in a row along the top.
+const ATLAS_STUB = extra => `
+Enum = Enum or {}
+Enum.UIMapType = { Continent = 2, Zone = 3 }
+local SIZE = { 40000, 30000 }
+local MAPS = {
+  [100]  = { type = 2, name = "Eastern Kingdoms", parent = 0 },
+  [1431] = { type = 3, name = "Duskwood", parent = 100, rect = { 0.30, 0.35, 0.70, 0.75 } },
+}
+for i = 0, ${extra} - 1 do
+  MAPS[2000 + i] = { type = 3, name = "Zone " .. i, parent = 100, rect = { 0.01 * i, 0.01 * i + 0.005, 0.01, 0.015 } }
+end
+STUB.atlasMaps = MAPS
+function CreateVector2D(x, y) return { x = x, y = y } end
+C_Map.GetMapInfo = function(id) local m = MAPS[id]; if m then return { mapID = id, name = m.name, mapType = m.type, parentMapID = m.parent } end end
+C_Map.GetMapRectOnMap = function(id, target) local m = MAPS[id]; if m and m.rect and target == m.parent then return m.rect[1], m.rect[2], m.rect[3], m.rect[4] end end
+C_Map.GetWorldPosFromMapPos = function(cont, v) return cont, { x = v.x * SIZE[1], y = v.y * SIZE[2] } end
+C_Map.GetMapChildrenInfo = function(id, t, all)
+  local out = {}
+  for mid, m in pairs(MAPS) do if m.parent == id and m.type == t then out[#out + 1] = { mapID = mid, name = m.name, mapType = m.type } end end
+  table.sort(out, function(a, b) return a.mapID < b.mapID end)
+  return out
+end
+`;
+
+function atlasVM(extra = 20) {
+  const vm = newVM();
+  vm.run(ATLAS_STUB(extra));
+  login(vm);
+  connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  return vm;
+}
+
+// Every different batch shown during `seconds` seconds, oldest first (a batch shown twice counts once).
+function collect(vm, seconds) {
+  const seen = new Map();
+  for (let i = 0; i < seconds; i++) {
+    advance(vm, 1);
+    const r = eventRecord(vm);
+    if (r && !seen.has(r.id)) seen.set(r.id, r);
+  }
+  return [...seen.values()];
+}
+const atlasOf = batches => batches.flatMap(b => linesOf(b).filter(l => /^[KW]\t/.test(l)));
+
+test('atlas: entering the world sends the continent size and each zone map once, 8 a batch', () => {
+  const vm = atlasVM(20);
+  const batches = collect(vm, 90);
+  const lines = atlasOf(batches);
+  const ks = lines.filter(l => l.startsWith('K\t'));
+  const ws = lines.filter(l => l.startsWith('W\t'));
+  assert.deepEqual(ks, ['K\t100\t40000\t30000'], 'continent size, once');
+  assert.equal(ws.length, 21, 'the 20 generated zones and Duskwood');
+  assert.equal(new Set(ws.map(l => l.split('\t')[1])).size, 21, 'no map twice');
+  for (const b of batches) assert.ok(linesOf(b).filter(l => l.startsWith('W\t')).length <= 8);
+  assert.ok(batches.filter(b => /\nW\t/.test(b.text)).length >= 3, 'spread over several batches');
+  assert.ok(ws.includes('W\t1431\t100\t3000\t3500\t7000\t7500\tDuskwood'), ws.join(' | '));
+  assert.ok(linesOf(batches[0]).some(l => /^E\t\d+\tlogin\t/.test(l)), 'the login event is not pushed out by the atlas');
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+  assert.equal(vm.num('WoWAIFeed.Status().atlasQueued'), 0);
+});
+
+test('atlas: the first batches stay inside the payload budget', () => {
+  const vm = atlasVM(40);
+  vm.run('STUB.quests = {}; for i = 1, 25 do STUB.quests[i] = { id = 1000 + i, title = "Quest " .. i, ready = false } end; STUB.FireEvent("QUEST_LOG_UPDATE")');
+  const batches = collect(vm, 120);
+  assert.ok(atlasOf(batches).length > 0, 'atlas lines were sent');
+  for (const b of batches) assert.ok(b.text.length <= 1250, `batch of ${b.text.length} bytes`);
+});
+
+test('atlas: later batches carry none until a new continent shows up or you ask again', () => {
+  const vm = atlasVM(5);
+  collect(vm, 40);
+  vm.run('STUB.FireEvent("PLAYER_LEVEL_UP", 9)');
+  const later = collect(vm, 12);
+  assert.ok(later.length >= 1);
+  assert.deepEqual(atlasOf(later), []);
+  vm.run('SlashCmdList.WOWAI("feed atlas")');
+  assert.ok(vm.num('WoWAIFeed.Status().atlasQueued') >= 6, 'everything is queued again');
+  const again = atlasOf(collect(vm, 40));
+  assert.equal(again.filter(l => l.startsWith('W\t')).length, 6);
+  assert.equal(again.filter(l => l.startsWith('K\t')).length, 1);
+});
+
+test('atlas: a client without the map functions (or an instance) sends nothing and raises no error', () => {
+  const vm = ready();
+  vm.run('STUB.FireEvent("ZONE_CHANGED_NEW_AREA")');
+  assert.deepEqual(atlasOf(collect(vm, 20)), []);
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+  const vm2 = atlasVM(0);
+  vm2.run('C_Map.GetMapRectOnMap = function() return 0, 0, 0, 0 end'); // an instance: no place on the continent
+  assert.deepEqual(atlasOf(collect(vm2, 20)).filter(l => l.startsWith('W\t')), []);
+  assert.equal(vm2.num('WoWAIFeed.Status().errors'), 0);
+  const vm3 = atlasVM(0);
+  vm3.run('C_Map.GetMapChildrenInfo = function() error("not in this client") end');
+  assert.ok(atlasOf(collect(vm3, 20)).some(l => l.startsWith('W\t1431\t')), 'the current map still goes out');
+});
+
+test('atlas: end to end, the strip becomes yards in the bridge', () => {
+  const vm = atlasVM(3);
+  vm.run('STUB.posX = 0.5; STUB.posY = 0.5');
+  const batches = collect(vm, 50);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-e2e-'));
+  const feed = Feed.createFeed({ dir: path.join(dir, 'state'), store: {} });
+  let n = 0;
+  for (const b of batches) {
+    const [j] = P.jobsFromStrip(b.id, ['s', '', b.id, '', 'e', '', b.text].join('\x1F')).filter(x => x.event);
+    assert.ok(j);
+    feed.ingest(j);
+    n++;
+  }
+  assert.ok(n >= 1);
+  const a = feed.atlas;
+  const p = a.toContinent(1431, 50, 50);
+  assert.equal(p.cont, 100);
+  assert.ok(Math.abs(p.x - 0.325 * 40000) < 1 && Math.abs(p.y - 0.725 * 30000) < 1, `${p.x}, ${p.y}`);
+  assert.match(feed.summary(), /on map 1431 \(continent 100, 13000,21750 yards\)/);
+  assert.match(fs.readFileSync(path.join(dir, 'state', 'maps.txt'), 'utf8'), /^1431 \| Duskwood \| 100 \| 12000 \| 21000 \| 2000 \| 1500$/m);
+});
