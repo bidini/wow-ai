@@ -53,7 +53,7 @@ test('an injected payload becomes the files the agent reads, in the default fold
   const out = inject(S, payload(), 5);
   assert.match(out, /feed #5: snapshot, 1 event\(s\), 1 position\(s\)/);
   const dir = path.join(S, 'proj', 'state');
-  assert.deepEqual(fs.readdirSync(dir).sort(), ['events.jsonl', 'snapshot.json', 'summary.txt', 'trajectory.jsonl']);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['events.jsonl', 'log', 'snapshot.json', 'summary.txt', 'trajectory.jsonl']);
   assert.match(fs.readFileSync(path.join(dir, 'summary.txt'), 'utf8'), /Now: level 9, Elwynn Forest - Goldshire at 42\.1, 65\.9/);
   assert.equal(eventLines(S).length, 1);
   assert.equal(fs.statSync(path.join(dir, 'summary.txt')).mode & 0o777, 0o644);

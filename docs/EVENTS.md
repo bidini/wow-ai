@@ -66,10 +66,25 @@ The bridge writes them to `<default folder>/state/` (`feed.dir` in `config.json`
 
 The system prompt block names these files by absolute path, so an agent whose only file tools are Read, Grep and Glob can open the full history when the summary is not enough. It is labelled as data about the game, never instructions: quest and zone names come from the game client and are cleaned (control characters, backticks and quotes removed, 50 characters per title) before they reach a prompt or a file.
 
+## The permanent daily log
+
+Next to the live files, the bridge keeps a log that is **never rotated and never removed**: one folder per calendar day (the Mac's local date), in `<state folder>/log/`:
+
+```
+state/log/2026-11-04/events.jsonl      every event that day, appended (one JSON object per line)
+state/log/2026-11-04/trajectory.jsonl  the path that day: t, map, x, y
+state/log/2026-11-04/day.txt           a short overview: active hours, level range, zones, quests turned in, deaths, flights
+state/log/2026-11-04/day.json          the counts behind day.txt (the bridge's own bookkeeping)
+```
+
+Several sessions on the same date append to the same files, even across bridge restarts; a new date starts a new folder. A batch that crosses midnight is split between the two days by each line's own time. The live files at the top of the folder keep their 2 MB rotation (they are what the current state is built from); the daily files are the history.
+
+The agent's prompt names this folder and lists the newest seven dates that have a log, so it knows it can look back: it reads a day's `day.txt` first (about 1 KB) and the `.jsonl` files only when the detail matters. About 100 KB a day, so a year is well under 50 MB. Turn it off with `"feed": { "dailyLog": false }`.
+
 ## Configuration
 
 ```json
-"feed": { "enabled": true, "dir": "", "maxFileBytes": 2000000 }
+"feed": { "enabled": true, "dir": "", "maxFileBytes": 2000000, "dailyLog": true }
 ```
 
 `enabled: false` makes the bridge ignore event records. `dir` is where the files go (default: `state` inside the bridge's default folder). The addon side is `/wow-ai feed on|off`.
