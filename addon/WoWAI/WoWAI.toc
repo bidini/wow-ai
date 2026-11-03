@@ -12,3 +12,4 @@ WoWAI.lua
 Map.lua
 Feed.lua
 Code.lua
+Shop.lua

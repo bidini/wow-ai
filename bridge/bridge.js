@@ -724,6 +724,7 @@ function finish(job, status, text, session, denied) {
   // that part is what the game chat prints; the window gets the whole reply.
   let summary = '';
   let macros = [];
+  let shop = [];
   if (status === 'done') {
     ({ text, summary } = P.splitSummary(text));
     // After the split: a macro block the agent put after "TL;DR:" must not end up
@@ -732,6 +733,10 @@ function finish(job, status, text, session, denied) {
     text = m.text + (m.notes.length ? `\n\n[bridge] ${m.notes.join('; ')}` : '');
     macros = m.macros;
     summary = P.stripMacroBlocks(summary);
+    const sh = P.extractShopBlocks(text);
+    text = sh.text + (sh.notes.length ? `\n\n[bridge] ${sh.notes.join('; ')}` : '');
+    shop = sh.items;
+    summary = P.stripShopBlocks(summary);
     if (codePool) {
       const c = codePool.process(text);
       text = c.text + (c.notes.length ? `\n\n[bridge] ${c.notes.join('\n\n[bridge] ')}` : '');
@@ -739,7 +744,7 @@ function finish(job, status, text, session, denied) {
     }
   }
   noteMessage(job, status === 'done' ? 'assistant' : 'system', status === 'done' ? text : 'Bridge error: ' + text);
-  publish(chatKey(job), { chat: job.chat, id: job.id, status, text, summary, cwd: job.cwd, session, denied, macros, agent: job.agent || '' }, true);
+  publish(chatKey(job), { chat: job.chat, id: job.id, status, text, summary, cwd: job.cwd, session, denied, macros, shop, agent: job.agent || '' }, true);
   signal('sig', job.id, true);
   log(`#${job.id}${job.session ? '@' + job.session : ''} ${status} (${text.length} chars${summary ? ', summary ' + summary.length : ', no summary'})`);
   drainQueue();
