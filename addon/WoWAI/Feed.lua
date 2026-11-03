@@ -14,7 +14,7 @@
 --   D n                                   n lines were dropped to fit
 --   H race class faction                  the character (sent when it changes)
 --   I slot=itemID ...                     equipped items (sent when they change; an empty line = nothing)
---   R skill=rank/max ...                  skills and professions (sent when they change)
+--   R skill=rank/max[/p|/s] ...           skills; /p primary profession, /s secondary (sent when they change)
 --   A gen i n spell=rank ...              chunk i of n of the spells learned (a set, sent when it changes)
 --   E t taxi secs fromMap fx10 fy10 toMap tx10 ty10   a flight, timed take-off to landing
 --   K cont w h                            continent size in yards (docs/DISTANCE.md)
@@ -350,10 +350,16 @@ local function ReadSkills()
 	local n = Try(GetNumSkillLines)
 	if type(n) ~= "number" then return nil end
 	local parts = { "R" }
+	local section
 	for i = 1, math.min(n, 80) do
 		local name, header, _, rank, _, _, max = Try(GetSkillLineInfo, i)
-		if type(name) == "string" and not header and type(rank) == "number" and type(max) == "number" and #parts <= MAX_SKILLS then
-			parts[#parts + 1] = (Clean(name, 30):gsub("[=\t]", " ")) .. "=" .. math.floor(rank) .. "/" .. math.floor(max)
+		if type(name) == "string" and header then
+			section = name                                  -- "Professions", "Secondary Skills", "Weapon Skills", ...
+		elseif type(name) == "string" and type(rank) == "number" and type(max) == "number" and #parts <= MAX_SKILLS then
+			-- /p primary profession, /s secondary profession: from the section the line sits under
+			local mark = ""
+			if section and section == TRADE_SKILLS then mark = "/p" elseif section and section == SECONDARY_SKILLS then mark = "/s" end
+			parts[#parts + 1] = (Clean(name, 30):gsub("[=\t]", " ")) .. "=" .. math.floor(rank) .. "/" .. math.floor(max) .. mark
 		end
 	end
 	return table.concat(parts, "\t")

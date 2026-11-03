@@ -630,7 +630,7 @@ test('character: the first batches carry race and class, gear, skills and the sp
   const batches = collect(vm, 70);
   assert.deepEqual(linesStarting(batches, 'H'), ['H\tNight Elf\tHunter\tAlliance']);
   assert.deepEqual(linesStarting(batches, 'I'), ['I\t1=1234\t5=2345\t16=3456']);
-  assert.deepEqual(linesStarting(batches, 'R'), ['R\tBows=46/115\tSkinning=75/75\tFirst Aid=40/75\tSwords=10/115']);
+  assert.deepEqual(linesStarting(batches, 'R'), ['R\tBows=46/115\tSkinning=75/75/p\tFirst Aid=40/75/s\tSwords=10/115'], 'professions are marked /p, secondary skills /s');
   const a = linesStarting(batches, 'A');
   assert.equal(a.length, 1);
   assert.match(a[0], /^A\t\d+\t1\t1\tHeroic Strike=2\tBattle Shout=1\tCharge=1$/, 'highest rank per spell, once each');
@@ -713,8 +713,9 @@ test('character: end to end, the strip becomes the character record in the bridg
   assert.deepEqual([c.race, c.class, c.faction, c.gold], ['Night Elf', 'Hunter', 'Alliance', 123456]);
   assert.deepEqual(c.equipped, { 1: 1234, 5: 2345, 16: 3456 });
   assert.deepEqual(c.spells.map(s => s.name), ['Battle Shout', 'Charge', 'Heroic Strike']);
-  assert.equal(c.skills.length, 4);
-  assert.match(feed.summary(), /Character: Night Elf Hunter \(Alliance\), 12g 34s 56c, 3 items equipped, 3 spells, skills: Bows 46\/115, Skinning 75\/75, First Aid 40\/75, Swords 10\/115\./);
+  assert.deepEqual(c.professions, [{ name: 'Skinning', rank: 75, max: 75, secondary: false }, { name: 'First Aid', rank: 40, max: 75, secondary: true }]);
+  assert.deepEqual(c.skills.map(s => s.name), ['Bows', 'Swords']);
+  assert.match(feed.summary(), /Character: Night Elf Hunter \(Alliance\), 12g 34s 56c, 3 items equipped, 3 spells, professions: Skinning 75\/75; secondary: First Aid 40\/75, 2 other skills\./);
 });
 
 // ---------------------------------------------------------------------------
@@ -760,4 +761,25 @@ test('characters: end to end, two characters of one install end up in separate f
   assert.deepEqual([level('aria-test_realm'), level('borin-test_realm')], [12, 30]);
   assert.match(hub.block(), /Active character: Borin of Test Realm/);
   assert.match(hub.block(), /Other characters on this install: Aria of Test Realm \(level 12/);
+});
+
+test('professions: a client without the section names sends the skills unmarked', () => {
+  const vm = newVM();
+  vm.run(CHAR_STUB);
+  vm.run('TRADE_SKILLS = nil; SECONDARY_SKILLS = nil');
+  login(vm); connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  const r = linesStarting(collect(vm, 40), 'R');
+  assert.deepEqual(r, ['R\tBows=46/115\tSkinning=75/75\tFirst Aid=40/75\tSwords=10/115']);
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('professions: learning one (a new skill line) is sent as a changed R line', () => {
+  const vm = charVM();
+  collect(vm, 70);
+  vm.run('SKILL_CHANGED = true');
+  vm.run('local old = GetNumSkillLines; function GetNumSkillLines() return old() + 1 end; local oldInfo = GetSkillLineInfo; function GetSkillLineInfo(i) if i == old() + 1 then return "Fishing", nil, false, 1, 0, 0, 75 end return oldInfo(i) end; STUB.FireEvent("SKILL_LINES_CHANGED")');
+  const r = linesStarting(collect(vm, 30), 'R');
+  assert.equal(r.length, 1);
+  assert.match(r[0], /Fishing=1\/75$/);
 });

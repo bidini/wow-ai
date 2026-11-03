@@ -86,9 +86,9 @@ function parsePayload(text) {
       case 'R': {
         const skills = [];
         for (const tok of f.slice(1, 1 + MAX_SKILLS)) {
-          const m = /^(.+)=(\d{1,4})\/(\d{1,4})$/.exec(tok);
+          const m = /^(.+)=(\d{1,4})\/(\d{1,4})(?:\/([ps]))?$/.exec(tok);   // /p primary profession, /s secondary
           const name = m ? clean(m[1], 40) : '';
-          if (name) skills.push({ name, rank: Number(m[2]), max: Number(m[3]) });
+          if (name) skills.push(m[4] ? { name, rank: Number(m[2]), max: Number(m[3]), kind: m[4] } : { name, rank: Number(m[2]), max: Number(m[3]) });
         }
         out.hero = out.hero || {};
         out.hero.skills = skills;
@@ -208,7 +208,7 @@ function dayText(d) {
 
 function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), maxFileBytes = 2000000, transportFile = '', dailyLog = true, atlas: sharedAtlas = null }) {
   const atlas = sharedAtlas || createAtlas({ dir, transportFile, clean, log });
-  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, skills: [], spells: [], spellsGen: 0 }, spellAsm: null, quests: { active: [], ready: [] }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
+  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, professions: [], skills: [], skillsSeen: false, spells: [], spellsGen: 0 }, spellAsm: null, quests: { active: [], ready: [] }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
 
   const file = name => path.join(dir, name);
   function ensureDir() { fs.mkdirSync(dir, { recursive: true, mode: 0o755 }); }
@@ -248,7 +248,19 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       Object.assign(c, h.identity); ch.identity = true;
     }
     if (h.gear && JSON.stringify(h.gear) !== JSON.stringify(c.equipped)) { c.equipped = h.gear; ch.gear = true; }
-    if (h.skills && JSON.stringify(h.skills) !== JSON.stringify(c.skills)) { c.skills = h.skills; ch.skills = true; }
+    if (h.skills) {
+      // Professions are the skill lines marked /p and /s; weapon, class and language skills are the rest.
+      const profs = h.skills.filter(k => k.kind).map(k => ({ name: k.name, rank: k.rank, max: k.max, secondary: k.kind === 's' }));
+      const others = h.skills.filter(k => !k.kind).map(k => ({ name: k.name, rank: k.rank, max: k.max }));
+      const names = a => a.map(k => k.name).join('|');
+      const profsChanged = JSON.stringify(profs) !== JSON.stringify(c.professions || []);
+      const setChanged = names(others) !== names(c.skills || []);
+      // A weapon skill going from 46 to 47 updates the current value but is not worth a record of its own.
+      if (profsChanged) c.professions = profs;
+      if (setChanged || JSON.stringify(others) !== JSON.stringify(c.skills)) c.skills = others;
+      c.skillsSeen = true;
+      ch.skills = profsChanged || setChanged;
+    }
     for (const chunk of h.spellChunks || []) {
       if (chunk.gen < c.spellsGen) continue;                       // an older set arriving late
       let asm = mem.spellAsm;
@@ -279,6 +291,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       t: rx, level: s.level, map: s.map, x: s.x, y: s.y, zone: s.zone, subzone: s.subzone, dead: s.dead,
       xp: s.xp, xpMax: s.xpMax, gold: c.gold, race: c.race, class: c.class, faction: c.faction, equipped: c.equipped,
     };
+    rec.professions = c.professions;
     if (first || changes.skills) rec.skills = c.skills;
     if ((first && c.spells.length) || changes.spells) rec.spells = c.spells;
     dailyAppend('state.jsonl', [{ t: rx, line: JSON.stringify(rec) }]);
@@ -442,8 +455,14 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       if (ch.gold !== null && ch.gold !== undefined) bits.push(goldText(ch.gold));
       bits.push(`${Object.keys(ch.equipped || {}).length} items equipped`);
       if ((ch.spells || []).length) bits.push(`${ch.spells.length} spells`);
-      const sk = (ch.skills || []).slice(0, 6).map(k => `${k.name} ${k.rank}/${k.max}`);
-      if (sk.length) bits.push('skills: ' + sk.join(', ') + ((ch.skills || []).length > 6 ? `, and ${ch.skills.length - 6} more` : ''));
+      if (ch.skillsSeen) {
+        const profs = ch.professions || [];
+        const show = list => list.map(k => `${k.name} ${k.rank}/${k.max}`).join(', ');
+        const prim = profs.filter(k => !k.secondary), sec = profs.filter(k => k.secondary);
+        bits.push(profs.length ? 'professions: ' + [show(prim), sec.length ? `secondary: ${show(sec)}` : ''].filter(Boolean).join('; ') : 'no professions');
+        const n = (ch.skills || []).length;
+        if (n) bits.push(`${n} other skill${n === 1 ? '' : 's'}`);
+      }
       lines.push(`Character: ${bits.join(', ')}.`);
     }
     const qs = mem.quests;
