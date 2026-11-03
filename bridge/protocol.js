@@ -225,6 +225,11 @@ function codeHint(vocabulary) {
   ].filter(Boolean).join('\n');
 }
 
+// How the agent proposes things to buy (see "Shopping" below and docs/SHOP.md).
+const SHOP_HINT = [
+  'When something would help the player and has to be bought, you can propose it as a fenced block whose language tag is wowshop, one JSON object per line: {"item":"<exact item name>","where":"ah"|"vendor","why":"<short reason>","max":"<the most you would pay for ONE item, like 60s or 1g 20s>","qty":<number>,"vendor":"<npc name>","zone":"<zone>"}. Only item is required; vendor and zone are for vendor items. At the auction house the addon lists the items and, when the player clicks one, types its name into the search box; the player presses Search and buys. You never buy anything and you do not know current prices, so only give max when it is a sensible ceiling you can justify. Ask before you build a route around a purchase.',
+];
+
 // `feed` is the live-game summary from feed.js (empty when no events have arrived).
 // `code` is codeHint() text, or empty when the code pool is off.
 function systemPrompt(ctx, primer, feed, code) {
@@ -241,7 +246,9 @@ function systemPrompt(ctx, primer, feed, code) {
       '',
       ...MAP_HINT,
       '',
-      ...MACRO_HINT);
+      ...MACRO_HINT,
+      '',
+      ...SHOP_HINT);
     const c = String(code || '').trim();
     if (c) lines.push('', c);
   }
@@ -347,6 +354,7 @@ function luaTable(globalName, records, opts = {}) {
       lines.push(`\t\t\tdenied = { ${r.denied.map(luaStr).join(', ')} },`);
     }
     if (Array.isArray(r.macros) && r.macros.length) lines.push(luaMacros(r.macros));
+    if (Array.isArray(r.shop) && r.shop.length) lines.push(luaShop(r.shop));
     lines.push('\t\t},');
   }
   lines.push('\t},');
@@ -562,7 +570,82 @@ function luaMacros(macros) {
   return `\t\t\tmacros = { ${macros.map(m => `{ name = ${luaStr(m.name)}, body = ${luaStr(m.body)}, icon = ${m.icon == null ? 'nil' : typeof m.icon === 'number' ? m.icon : luaStr(m.icon)}, char = ${m.char ? 'true' : 'false'}, risky = ${m.risky ? 'true' : 'false'} }`).join(', ')} },`;
 }
 
+// ---------------------------------------------------------------------------
+// Shopping suggestions
+// ---------------------------------------------------------------------------
+//
+// A reply can propose things to buy in ```wowshop blocks (JSON, one object per line, or an
+// array). The bridge validates them and sends them as `shop` on the reply record; the addon lists
+// the auction house ones when the auction house opens and, on a click, types the item name into
+// the search box. Nothing is bought or searched by the addon. The block becomes readable text.
+
+const SHOP_LIMITS = { perReply: 12, item: 50, why: 100, vendor: 40, zone: 30 };
+const SHOP_RE = /```wowshop[^\n]*\n([\s\S]*?)```/g;
+
+// Plain text for the game: no control characters, color escapes, link brackets or backticks.
+const shopClean = (s, max) => firstChars(String(s ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029|\[\]`]/g, ' ').replace(/\s+/g, ' ').trim(), max).trim();
+
+function normalizeShopItem(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  const item = shopClean(o.item, SHOP_LIMITS.item);
+  if (item.length < 2) return null;
+  const out = { item, where: o.where === 'vendor' ? 'vendor' : 'ah' };
+  const why = shopClean(o.why, SHOP_LIMITS.why);
+  if (why) out.why = why;
+  const max = String(o.max ?? '').trim();
+  if (/^[0-9gsc. ]{1,16}$/.test(max) && /\d/.test(max)) out.max = max.replace(/\s+/g, ' ');
+  const qty = typeof o.qty === 'number' ? o.qty : /^\d{1,4}$/.test(String(o.qty ?? '')) ? Number(o.qty) : NaN;
+  if (Number.isInteger(qty) && qty >= 1 && qty <= 9999) out.qty = qty;
+  const vendor = shopClean(o.vendor, SHOP_LIMITS.vendor), zone = shopClean(o.zone, SHOP_LIMITS.zone);
+  if (out.where === 'vendor') { if (vendor) out.vendor = vendor; if (zone) out.zone = zone; }
+  return out;
+}
+
+function shopLine(i) {
+  if (i.where === 'vendor') return `Vendor: ${i.item}${i.vendor ? ` from ${i.vendor}${i.zone ? ` in ${i.zone}` : ''}` : ''}${i.why ? `: ${i.why}` : ''}`;
+  return `Auction house: ${i.item}${i.qty ? ` x${i.qty}` : ''}${i.max ? ` (up to ${i.max} each)` : ''}${i.why ? `: ${i.why}` : ''}`;
+}
+
+// { text, items, notes }: each block is replaced by a readable list.
+function extractShopBlocks(text) {
+  const items = [], notes = [];
+  let ignored = 0, over = false;
+  const out = String(text ?? '').replace(SHOP_RE, (_, body) => {
+    const raw = [];
+    const src = String(body).trim();
+    try { const v = JSON.parse(src); raw.push(...(Array.isArray(v) ? v : [v])); } catch {
+      for (const line of src.split('\n')) {
+        if (!line.trim()) continue;
+        try { raw.push(JSON.parse(line)); } catch { ignored++; }
+      }
+    }
+    const mine = [];
+    for (const o of raw) {
+      const it = normalizeShopItem(o);
+      if (!it) { ignored++; continue; }
+      if (items.length >= SHOP_LIMITS.perReply) { over = true; continue; }
+      items.push(it); mine.push(it);
+    }
+    return mine.length ? `Shopping suggestions:\n${mine.map(i => '- ' + shopLine(i)).join('\n')}` : '';
+  }).replace(/\n{3,}/g, '\n\n').trim();
+  if (items.length) notes.push(`${items.length} suggestion${items.length === 1 ? '' : 's'} to buy: open the auction house in the game to search for them, or type /wow-ai shop`);
+  if (ignored) notes.push(`${ignored} shopping entr${ignored === 1 ? 'y was' : 'ies were'} not understood and ignored`);
+  if (over) notes.push(`only the first ${SHOP_LIMITS.perReply} suggestions are kept`);
+  return { text: out, items, notes };
+}
+
+// The summary is printed into the game chat: shopping blocks have no place there.
+function stripShopBlocks(text) {
+  return String(text ?? '').replace(SHOP_RE, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function luaShop(items) {
+  const one = i => `{ item = ${luaStr(i.item)}, where = ${luaStr(i.where)}${i.why ? `, why = ${luaStr(i.why)}` : ''}${i.max ? `, max = ${luaStr(i.max)}` : ''}${i.qty ? `, qty = ${i.qty}` : ''}${i.vendor ? `, vendor = ${luaStr(i.vendor)}` : ''}${i.zone ? `, zone = ${luaStr(i.zone)}` : ''} }`;
+  return `\t\t\tshop = { ${items.map(one).join(', ')} },`;
+}
+
 module.exports = {
+  SHOP_LIMITS, extractShopBlocks, stripShopBlocks, luaShop,
   fromHex, pad3, slotNumber, chatKey, sessKey,
   alreadyHandled, markHandled, pruneStale, MONTH_MS,
   resolveCwd, sameFolder, baseName,
