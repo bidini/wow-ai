@@ -45,7 +45,7 @@ function inject(S, text, id) {
   return r.stdout;
 }
 const eventLines = S => {
-  try { return fs.readFileSync(path.join(S, 'proj', 'state', 'events.jsonl'), 'utf8').trim().split('\n').filter(Boolean); } catch { return []; }
+  try { return fs.readFileSync(path.join(S, 'proj', 'state', 'characters', 'unknown', 'events.jsonl'), 'utf8').trim().split('\n').filter(Boolean); } catch { return []; }
 };
 
 test('an injected payload becomes the files the agent reads, in the default folder', () => {
@@ -53,10 +53,12 @@ test('an injected payload becomes the files the agent reads, in the default fold
   const out = inject(S, payload(), 5);
   assert.match(out, /feed #5: snapshot, 1 event\(s\), 1 position\(s\)/);
   const dir = path.join(S, 'proj', 'state');
-  assert.deepEqual(fs.readdirSync(dir).sort(), ['events.jsonl', 'log', 'snapshot.json', 'summary.txt', 'trajectory.jsonl']);
-  assert.match(fs.readFileSync(path.join(dir, 'summary.txt'), 'utf8'), /Now: level 9, Elwynn Forest - Goldshire at 42\.1, 65\.9/);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['characters', 'characters.json', 'characters.txt'], 'a batch with no character name goes to "unknown"');
+  const mine = path.join(dir, 'characters', 'unknown');
+  assert.deepEqual(fs.readdirSync(mine).sort(), ['events.jsonl', 'log', 'snapshot.json', 'summary.txt', 'trajectory.jsonl']);
+  assert.match(fs.readFileSync(path.join(mine, 'summary.txt'), 'utf8'), /Now: level 9, Elwynn Forest - Goldshire at 42\.1, 65\.9/);
   assert.equal(eventLines(S).length, 1);
-  assert.equal(fs.statSync(path.join(dir, 'summary.txt')).mode & 0o777, 0o644);
+  assert.equal(fs.statSync(path.join(mine, 'summary.txt')).mode & 0o777, 0o644);
 });
 
 test('a repeated frame is ignored, even by a restarted bridge; new content is stored', () => {
@@ -89,6 +91,18 @@ test('"feed": { "dir": ... } moves the files', () => {
   cfg.feed = { dir: elsewhere };
   fs.writeFileSync(path.join(S, 'config.json'), JSON.stringify(cfg));
   inject(S, payload(), 5);
-  assert.ok(fs.existsSync(path.join(elsewhere, 'events.jsonl')));
+  assert.ok(fs.existsSync(path.join(elsewhere, 'characters', 'unknown', 'events.jsonl')));
   assert.ok(!fs.existsSync(path.join(S, 'proj', 'state')));
+});
+
+test('each character in a payload gets its own folder in the real bridge', () => {
+  const S = sandbox();
+  inject(S, payload().replace('v\t1', 'v\t1\tAria\tTest Realm'), 1);
+  inject(S, payload([`E\t${T0}\tdead`]).replace('v\t1', 'v\t1\tBorin\tTest Realm'), 2);
+  const base = path.join(S, 'proj', 'state', 'characters');
+  assert.deepEqual(fs.readdirSync(base).sort(), ['aria-test_realm', 'borin-test_realm']);
+  assert.equal(fs.readFileSync(path.join(base, 'aria-test_realm', 'events.jsonl'), 'utf8').trim().split('\n').length, 1);
+  assert.equal(fs.readFileSync(path.join(base, 'borin-test_realm', 'events.jsonl'), 'utf8').trim().split('\n').length, 2);
+  const idx = JSON.parse(fs.readFileSync(path.join(S, 'proj', 'state', 'characters.json'), 'utf8'));
+  assert.equal(idx.active, 'borin-test_realm');
 });

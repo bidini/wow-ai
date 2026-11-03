@@ -139,7 +139,7 @@ test('login: the first batch carries the version, a snapshot and a login event',
   assert.equal(rec.flags, 'e');
   assert.equal(rec.chat, '');
   const lines = linesOf(rec);
-  assert.equal(lines[0], 'v\t1');
+  assert.equal(lines[0], 'v\t1\tTestchar\tTest Realm');
   const s = lines[1].split('\t');
   assert.equal(s[0], 'S');
   assert.equal(s[2], '23', 'level');
@@ -715,4 +715,49 @@ test('character: end to end, the strip becomes the character record in the bridg
   assert.deepEqual(c.spells.map(s => s.name), ['Battle Shout', 'Charge', 'Heroic Strike']);
   assert.equal(c.skills.length, 4);
   assert.match(feed.summary(), /Character: Night Elf Hunter \(Alliance\), 12g 34s 56c, 3 items equipped, 3 spells, skills: Bows 46\/115, Skinning 75\/75, First Aid 40\/75, Swords 10\/115\./);
+});
+
+// ---------------------------------------------------------------------------
+// Several characters: every batch names the character (and realm) that is playing.
+// ---------------------------------------------------------------------------
+
+test('characters: every batch starts with the version, the character name and the realm', () => {
+  const vm = ready({ settle: false });
+  const first = nextBatch(vm);
+  assert.equal(linesOf(first)[0], 'v\t1\tTestchar\tTest Realm');
+  vm.run('STUB.FireEvent("PLAYER_LEVEL_UP", 9)');
+  const later = nextBatch(vm, 40);
+  assert.equal(linesOf(later)[0], 'v\t1\tTestchar\tTest Realm');
+});
+
+test('characters: a name with odd characters cannot break the line, and a missing name leaves the old form', () => {
+  const vm = ready({ settle: false });
+  vm.run('function UnitName(unit) return "Evil\\tname\\nE\\t1\\tlevel\\t99`x" end; function GetRealmName() return "Real\\tm" end');
+  const b = nextBatch(vm);
+  const head = linesOf(b)[0].split('\t');
+  assert.deepEqual(head.slice(0, 2), ['v', '1']);
+  assert.equal(head.length, 4);
+  assert.ok(!linesOf(b).some(l => /^E\t1\tlevel\t99/.test(l)), 'no injected line');
+  assert.ok(!linesOf(b)[0].includes('`'));
+  const vm2 = ready({ settle: false });
+  vm2.run('function UnitName(unit) return nil end');
+  assert.equal(linesOf(nextBatch(vm2))[0], 'v\t1');
+});
+
+test('characters: end to end, two characters of one install end up in separate folders', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'two-chars-'));
+  const hub = Feed.createFeedHub({ dir: path.join(dir, 'state'), store: {} });
+  for (const [name, level] of [['Aria', 12], ['Borin', 30]]) {
+    const vm = ready({ settle: false });
+    vm.run(`function UnitName(unit) return "${name}" end; STUB.level = ${level}`);
+    for (const b of collect(vm, 12)) {
+      const [j] = P.jobsFromStrip(b.id, ['s', '', b.id, '', 'e', '', b.text].join('\x1F')).filter(x => x.event);
+      hub.ingest(j);
+    }
+  }
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'state', 'characters')).sort(), ['aria-test_realm', 'borin-test_realm']);
+  const level = k => JSON.parse(fs.readFileSync(path.join(dir, 'state', 'characters', k, 'snapshot.json'), 'utf8')).now.level;
+  assert.deepEqual([level('aria-test_realm'), level('borin-test_realm')], [12, 30]);
+  assert.match(hub.block(), /Active character: Borin of Test Realm/);
+  assert.match(hub.block(), /Other characters on this install: Aria of Test Realm \(level 12/);
 });

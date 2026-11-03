@@ -6,7 +6,7 @@
 -- Everything here only reads game state. Nothing moves, targets, casts or acts for you.
 --
 -- Batch lines (tab separated, newline between lines):
---   v 1                                   payload version
+--   v 1 name realm                        payload version, and which character is playing
 --   S t level map x10 y10 cur run zone sub dead xp xpmax   state snapshot (every batch)
 --   Q id[*] id[*] ...                     whole quest log, * = ready to turn in
 --   E t type args...                      an event
@@ -463,7 +463,10 @@ end
 local function Build()
 	local db = WoWAIDB
 	local now = GetTime()
-	local head = { "v\t1", Snapshot() }
+	-- Who is playing, so the bridge keeps each character's files apart (docs/EVENTS.md).
+	local who = Clean(Try(UnitName, "player"), 40)
+	local realm = Clean(Try(GetRealmName), 40)
+	local head = { who ~= "" and ("v\t1\t" .. who .. "\t" .. realm) or "v\t1", Snapshot() }
 	if F.qline and F.quests then
 		head[#head + 1] = QLine()
 		F.qline = false

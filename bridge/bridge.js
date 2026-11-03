@@ -128,7 +128,7 @@ for (const [k, v] of Object.entries(state.handled)) {
 const FEED_CFG = Object.assign({ enabled: true, dir: '', maxFileBytes: 2000000, transportFile: '', dailyLog: true }, cfg.feed || {});
 const FEED_DIR = path.resolve(FEED_CFG.dir || path.join(DEFAULT_CWD, 'state'));
 const feed = FEED_CFG.enabled === false ? null
-  : Feed.createFeed({ dir: FEED_DIR, store: state.feed, log: (...a) => log(...a), maxFileBytes: FEED_CFG.maxFileBytes, dailyLog: FEED_CFG.dailyLog !== false,
+  : Feed.createFeedHub({ dir: FEED_DIR, store: state.feed, log: (...a) => log(...a), maxFileBytes: FEED_CFG.maxFileBytes, dailyLog: FEED_CFG.dailyLog !== false,
       transportFile: path.resolve(FEED_CFG.transportFile || path.join(__dirname, '..', 'data', 'transport.json')) });
 
 // Agent-proposed addon code (docs/CODE.md). Off unless "code": { "enabled": true } is set: the agent

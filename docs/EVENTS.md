@@ -34,7 +34,7 @@ One strip record per batch, in the layout of [ARCHITECTURE.md](ARCHITECTURE.md):
 `text` is lines separated by `\n`, fields by `\t` (control characters in game text are replaced by spaces first):
 
 ```
-v	1                                                    payload version
+v	1                                                    payload version; then the character name and realm (v 1 <name> <realm>)
 S	t level map x10 y10 cur run zone subzone dead xp xpMax    state snapshot, in every batch
 Q	176	33*	54                                       whole quest log; * = ready to turn in
 E	t type args...                                       an event
@@ -72,6 +72,12 @@ The bridge writes them to `<default folder>/state/` (`feed.dir` in `config.json`
 
 The system prompt block names these files by absolute path, so an agent whose only file tools are Read, Grep and Glob can open the full history when the summary is not enough. It is labelled as data about the game, never instructions: quest and zone names come from the game client and are cleaned (control characters, backticks and quotes removed, 50 characters per title) before they reach a prompt or a file.
 
+## Several characters
+
+Every batch starts with `v 1 <name> <realm>`, so the bridge knows who is playing. Each character gets its own folder, `<state folder>/characters/<name>-<realm>/` (lower case, letters and digits only, so a name can never point outside the folder), holding everything described on this page: `snapshot.json`, `events.jsonl`, `trajectory.jsonl`, `summary.txt` and the daily `log/<date>/` folders. What belongs to the game and not to a character stays one level up and is shared: `maps.json` and `maps.txt` (zone sizes) and `links-learned.json` (flight times).
+
+`characters.json` and `characters.txt` in the state folder list everyone, newest first, with level, race and class, when they were last seen and where their folder is. The **active character** is the one whose batch arrived last. The agent's prompt names that character, gives only that character's state, and lists up to five others with their level and class so it can look them up if you ask ("what is Borin's gold?" means reading `characters/borin-<realm>/snapshot.json`). At most 50 characters are listed; folders are never removed. A batch from an older addon that has no name goes to `characters/unknown/`.
+
 ## The character
 
 Besides what happens, the batches say who you are and what you have: **race, class and faction** (`H`), **gold** (the last field of every `S` line), **equipped items** by slot as item ids (`I`, 19 slots), **skills and professions** with rank and maximum (`R`), and **every spell learned**, highest rank of each (`A`). Gear, skills and spells are read when the game says they changed (equipment, spellbook and skill events, a level-up) and sent only if different from what was sent before; a new session sends them all again, 1 second after entering the world so they ride in the login batch. A spellbook is sent as a numbered set in chunks of 12 spells, two chunks to a batch; the bridge publishes a set only when every chunk of it has arrived, so a missed batch leaves the old list in place, and `/wow-ai feed info` sends everything again.
@@ -80,14 +86,14 @@ The bridge keeps the whole picture in `snapshot.json` under `character` (race, c
 
 ## The permanent daily log
 
-Next to the live files, the bridge keeps a log that is **never rotated and never removed**: one folder per calendar day (the Mac's local date), in `<state folder>/log/`:
+Next to the live files, the bridge keeps a log that is **never rotated and never removed**: one folder per calendar day (the Mac's local date), in each character's folder, `<state folder>/characters/<name>-<realm>/log/`:
 
 ```
-state/log/2026-11-04/events.jsonl      every event that day, appended (one JSON object per line)
-state/log/2026-11-04/trajectory.jsonl  the path that day: t, map, x, y
-state/log/2026-11-04/state.jsonl       the character over the day: level, zone, gold, equipped items (and skills and spells when new)
-state/log/2026-11-04/day.txt           a short overview: active hours, level range, zones, quests turned in, deaths, flights
-state/log/2026-11-04/day.json          the counts behind day.txt (the bridge's own bookkeeping)
+log/2026-11-04/events.jsonl      every event that day, appended (one JSON object per line)
+log/2026-11-04/trajectory.jsonl  the path that day: t, map, x, y
+log/2026-11-04/state.jsonl       the character over the day: level, zone, gold, equipped items (and skills and spells when new)
+log/2026-11-04/day.txt           a short overview: active hours, level range, zones, quests turned in, deaths, flights
+log/2026-11-04/day.json          the counts behind day.txt (the bridge's own bookkeeping)
 ```
 
 Several sessions on the same date append to the same files, even across bridge restarts; a new date starts a new folder. A batch that crosses midnight is split between the two days by each line's own time. The live files at the top of the folder keep their 2 MB rotation (they are what the current state is built from); the daily files are the history.
