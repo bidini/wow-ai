@@ -55,26 +55,42 @@ def emit(obj):
 # Decoder: identical rules to capture.ps1 and capture_x11.py
 # ---------------------------------------------------------------------------
 
-def cell_value(px, c, r, ox=0, oy=0):
-    rr, gg, bb = px(ox + c * CELL + CELL // 2, oy + r * CELL + CELL // 2)
+# The addon draws cells in UI units and the game renders them at whatever scale the window has, so a
+# cell is rarely 4 pixels square (4.5 wide and 2.8 tall on the first Forever login). The decoder measures
+# the pitch (pixels per cell, across and down) from the picture: the strip's first cells are a known
+# pattern, and every cell is one flat color, so the right pitch is the one where all samples agree.
+PITCH_MIN, PITCH_MAX, PITCH_STEP = 2.0, 10.0, 0.005
+PITCH_STEP_Y = 0.01
+HEADER_BYTES = 6
+
+
+def cell_at(px, width, height, x, y):
+    xi = min(max(int(x), 0), width - 1)
+    yi = min(max(int(y), 0), height - 1)
+    rr, gg, bb = px(xi, yi)
     return (4 if rr >= 128 else 0) + (2 if gg >= 128 else 0) + (1 if bb >= 128 else 0)
 
 
-def has_magic(px, ox, oy):
+def is_yellow(rgb):
+    return rgb[0] >= 128 and rgb[1] >= 128 and rgb[2] < 128
+
+
+def has_magic(px, width, height, ox, oy, pw):
     acc = 0
     for i in range(6):  # 18 bits cover the two magic bytes
-        acc = (acc << 3) | cell_value(px, i, 0, ox, oy)
+        acc = (acc << 3) | cell_at(px, width, height, ox + (i + 0.5) * pw, oy + 1)
     return (acc >> 2) == 0xC71A
 
 
-def decode(px, ox=0, oy=0):
+def decode(px, width, height, ox, oy, pw, ph):
+    """Read the cells at pitch pw x ph from the strip's top-left corner (ox, oy)."""
     acc = 0
     nbits = 0
     out = bytearray()
-    needed = 6
+    needed = HEADER_BYTES
     total = CELLS * MAXROWS
     for i in range(total):
-        acc = (acc << 3) | cell_value(px, i % CELLS, i // CELLS, ox, oy)
+        acc = (acc << 3) | cell_at(px, width, height, ox + (i % CELLS + 0.5) * pw, oy + (i // CELLS + 0.5) * ph)
         nbits += 3
         while nbits >= 8:
             out.append((acc >> (nbits - 8)) & 0xFF)
@@ -82,7 +98,7 @@ def decode(px, ox=0, oy=0):
             acc &= (1 << nbits) - 1
             if len(out) == 2 and (out[0] != 0xC7 or out[1] != 0x1A):
                 return None
-            if len(out) == 6:
+            if len(out) == HEADER_BYTES:
                 length = out[4] * 256 + out[5]
                 needed = 8 + length
                 if needed > total * 3 // 8:
@@ -104,18 +120,100 @@ def decode(px, ox=0, oy=0):
     return {"id": out[2] * 256 + out[3], "text": text}
 
 
+def header_rows(px, width, height, ox, oy, pw):
+    """Rows the strip spans, from the length in its first 6 bytes (None if that is not a plausible length)."""
+    value = 0
+    for i in range(16):  # 16 cells = 48 bits = the 6 header bytes
+        value = (value << 3) | cell_at(px, width, height, ox + (i + 0.5) * pw, oy + 1)
+    needed = 8 + (value & 0xFFFF)
+    if needed > CELLS * MAXROWS * 3 // 8:
+        return None
+    cells = (needed * 8 + 2) // 3
+    return (cells + CELLS - 1) // CELLS
+
+
+def row_agreement(px, width, height, ox, oy, pw):
+    """How many of the 200 cells of row 0 are one color at three places across the cell."""
+    hit = 0
+    for c in range(CELLS):
+        x = ox + (c + 0.5) * pw
+        a = cell_at(px, width, height, x - 0.25 * pw, oy + 1)
+        if a == cell_at(px, width, height, x, oy + 1) == cell_at(px, width, height, x + 0.25 * pw, oy + 1):
+            hit += 1
+    return hit
+
+
+def column_agreement(px, width, height, ox, oy, pw, ph, rows):
+    """How many sampled cells are one color at three places down the cell, over all rows."""
+    hit = 0
+    for r in range(rows):
+        y = oy + (r + 0.5) * ph
+        for c in range(0, CELLS, 5):
+            x = ox + (c + 0.5) * pw
+            a = cell_at(px, width, height, x, y - 0.3 * ph)
+            if a == cell_at(px, width, height, x, y) == cell_at(px, width, height, x, y + 0.3 * ph):
+                hit += 1
+    return hit
+
+
+def best_pitch(candidates, score):
+    """The middle of the largest group of neighbouring pitches that score best. Neighbours read alike,
+    so the best score is a plateau; a half or a third of the true pitch scores as well (cells cut in
+    pieces are still one color), so the largest plateau is the cell itself."""
+    scored = [score(v) for v in candidates]
+    top = max(scored)
+    group = []
+    for i, sc in enumerate(scored):
+        if sc == top:
+            if group and group[-1] != i - 1:
+                group = []
+            group.append(i)
+    return candidates[group[len(group) // 2]]
+
+
+def estimate_ph(px, width, height, ox, oy, pw, rows):
+    """Row height: a coarse pass over the first rows, then a fine pass over all of them."""
+    coarse = [PITCH_MIN + i * 0.05 for i in range(int((PITCH_MAX - PITCH_MIN) / 0.05) + 1)]
+    first = min(rows, 8)
+    ph0 = best_pitch(coarse, lambda ph: column_agreement(px, width, height, ox, oy, pw, ph, first))
+    fine = [ph0 - 0.15 + i * PITCH_STEP_Y for i in range(31)]
+    return best_pitch(fine, lambda ph: column_agreement(px, width, height, ox, oy, pw, ph, rows))
+
+
 def find_and_decode(px, width, height, hint):
-    """Decode at the last good offset, else search a top-left window for the magic.
-    The vertical search window is larger because the macOS title bar pushes the
-    UIParent top-left down."""
-    cands = [hint] if hint else []
-    cands += [(dx, dy) for dy in range(YSLACK + 1) for dx in range(XSLACK + 1)]
-    for ox, oy in cands:
-        if ox + W > width or oy + H > height:
-            continue
-        if has_magic(px, ox, oy):
-            return decode(px, ox, oy), (ox, oy)
-    return None, hint
+    """Decode at the last good geometry (ox, oy, pw, ph), else search the top-left corner for the strip.
+    The first cell is always yellow, so the search starts at yellow pixels; the vertical window is larger
+    because the macOS title bar pushes the UIParent top-left down. ph is None until a strip of two rows
+    or more has shown the row height (a single row never needs it)."""
+    if hint:
+        msg = decode(px, width, height, hint[0], hint[1], hint[2], hint[3] or 2.0)
+        if msg and not msg.get("error"):
+            return msg, hint
+    seen = None
+    steps = int((PITCH_MAX - PITCH_MIN) / PITCH_STEP) + 1
+    for oy in range(YSLACK + 1):
+        for ox in range(XSLACK + 1):
+            if oy + 1 >= height or ox + 1 >= width:
+                continue
+            if not (is_yellow(px(ox + 1, oy)) and is_yellow(px(ox + 1, oy + 1))):
+                continue
+            if oy > 0 and is_yellow(px(ox + 1, oy - 1)):  # the strip's top row, not one below it
+                continue
+            pitches = [PITCH_MIN + i * PITCH_STEP for i in range(steps)
+                       if has_magic(px, width, height, ox, oy, PITCH_MIN + i * PITCH_STEP)]
+            if not pitches:
+                continue
+            pw = best_pitch(pitches, lambda v: row_agreement(px, width, height, ox, oy, v))
+            rows = header_rows(px, width, height, ox, oy, pw)
+            if not rows:
+                seen = seen or {"error": "length"}
+                continue
+            ph = estimate_ph(px, width, height, ox, oy, pw, rows) if rows > 1 else None
+            msg = decode(px, width, height, ox, oy, pw, ph or 2.0)
+            if msg and not msg.get("error"):
+                return msg, (ox, oy, pw, ph)
+            seen = seen or msg
+    return seen, hint
 
 
 # ---------------------------------------------------------------------------
