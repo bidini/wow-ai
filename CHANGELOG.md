@@ -4,6 +4,10 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- macOS capture: the strip is read at the cell size the picture actually has. On the first Forever login the window drew cells about 4.5 pixels wide and 2.8 tall, not 4, so the capture saw the strip but rejected it ("strip seen but rejected: length"). `capture_mac.py` now measures the cell width from the strip's known first cells and the row height from the rows themselves (2 to 10 pixels), and keeps the result until the strip is lost. `tests/capture_scale_test.js` covers odd scales, blurred edges and a real capture. The Windows and Linux readers are unchanged.
+
 ### Added
 
 - Event feed: the addon reports quests (accepted, ready, turned in, abandoned), zones, level-ups, deaths and your path (a position sample about every 10 s while moving, plus a heartbeat) in small batches on the pixel strip, with a state snapshot in every batch. The bridge writes `summary.txt`, `snapshot.json`, `events.jsonl` and `trajectory.jsonl` to `<default folder>/state` and puts the summary in the agent's system prompt, labelled as data; events never start an agent run and use no acknowledgement files. `/wow-ai feed [on|off|hold <s>|shows <n>]`, `feed` in `config.json`, `bridge.js --inject-feed <file>` to try a payload without the game. See [docs/EVENTS.md](docs/EVENTS.md).

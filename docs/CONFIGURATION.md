@@ -55,7 +55,7 @@ Keys under `capture`:
 |---|---|---|
 | `enabled` | `true` | Run `capture.ps1` (Windows), `capture_mac.py` (macOS) or `capture_x11.py` (Linux). With `false` only the reload path works (`/wow-ai mode reload` in game). |
 | `processName` | `"WowB"` | The game executable without `.exe`. `setup.js` sets it from the `Wow*.exe` it finds in the client folder (on macOS, from the binary inside the `.app` bundle). |
-| `cellPx` | `4` | Pixel size of one strip cell. Must match `CELL` in `addon/WoWAI/Codec.lua`. |
+| `cellPx` | `4` | Pixel size of one strip cell. Must match `CELL` in `addon/WoWAI/WoWAI.lua`. On macOS the capture measures the real cell size (2 to 10 pixels, across and down) from the picture, so a scaled window is read too; Windows and Linux use this number as is. |
 | `cellsPerRow` | `200` | Cells per strip row. Must match the addon. |
 | `maxRows` | `48` | Maximum strip rows captured. Must match the addon. |
 | `intervalMs` | `250` | Capture period. Lower is more responsive and costs a little more CPU. |
