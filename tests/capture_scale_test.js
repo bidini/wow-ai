@@ -50,13 +50,13 @@ function png(width, height, rgb) {
 // Cells (and the black rest of their rows) drawn at pitch pw x ph from (ox, oy): each pixel takes the
 // area-weighted mix of the cells it overlaps, as a scaled render does. Above is a title bar, the rest is
 // a dark noisy scene.
-function render(cells, { pw, ph, ox, oy, width = 1100, height = 400, noise = 30 }) {
+function render(cells, { pw, ph, ox, oy, hide = 0, cover = null, width = 1100, height = 400, noise = 30 }) {
   const rows = Math.ceil(cells.length / CELLS);
   const cellRgb = i => {
     const v = i < cells.length ? cells[i] : 0;
     return [Math.floor(v / 4) % 2, Math.floor(v / 2) % 2, v % 2].map(l => l * 255);
   };
-  const cover = (pos, origin, pitch, n) => {      // [index, weight] of the cells under the pixel [pos, pos + 1)
+  const under = (pos, origin, pitch, n) => {      // [index, weight] of the cells under the pixel [pos, pos + 1)
     const a = (pos - origin) / pitch, b = (pos + 1 - origin) / pitch, out = [];
     for (let k = Math.floor(a); k <= Math.floor(b - 1e-9); k++) {
       const w = (Math.min(b, k + 1) - Math.max(a, k)) / (b - a);
@@ -69,9 +69,9 @@ function render(cells, { pw, ph, ox, oy, width = 1100, height = 400, noise = 30 
     const o = (y * width + x) * 3;
     let px, scene = false;
     if (y < oy - 1) px = [46, 45, 45];                                           // title bar
-    else if (y < oy && x < pw * CELLS) px = [0, 0, 0];                           // black line above the strip
+    else if (y < oy + hide && x < pw * CELLS) px = [0, 0, 0];                    // black line above the strip (and over its top `hide` px)
     else {
-      const cx = cover(x, ox, pw, CELLS), cy = cover(y, oy, ph, rows);
+      const cx = under(x, ox, pw, CELLS), cy = under(y, oy, ph, rows);
       px = null;
       if (cx.length && cy.length) {
         const acc = [0, 0, 0]; let wsum = 0;
@@ -84,6 +84,7 @@ function render(cells, { pw, ph, ox, oy, width = 1100, height = 400, noise = 30 
       }
       if (!px) { px = [22, 26, 20]; scene = true; }                                // scene
     }
+    if (cover && x < cover.w && y >= cover.fromY) { px = [60, 70, 55]; scene = true; }   // something on top of the corner, like the Dock
     for (let k = 0; k < 3; k++) rgb[o + k] = Math.max(0, Math.min(255, Math.round(px[k] + (Math.random() * 2 - 1) * noise * (scene ? 1 : 0.3))));
   }
   return png(width, height, rgb);
@@ -105,6 +106,11 @@ const cases = [
   { name: 'exact Retina, 8 x 8', pw: 8, ph: 8, ox: 0, oy: 56, id: 14, payload: feed(18), width: 1700 },
   { name: 'small cells, 3.1 x 3.1, long message', pw: 3.1, ph: 3.1, ox: 2, oy: 40, id: 15, payload: feed(60) },
   { name: 'offset and odd scale, 5.37 x 4.0', pw: 5.37, ph: 4.0, ox: 3, oy: 30, id: 16, payload: feed(33), width: 1200 },
+  // The first live capture with several rows: columns 4.5 wide, rows 4 tall, and the window border hiding the top pixel of row 0.
+  { name: 'one row, 4.5 x 4.0, top pixel hidden', pw: 4.5, ph: 4.0, ox: 0, oy: 56, hide: 1, id: 21, payload: feed(0) },
+  { name: 'several rows, 4.5 x 4.0, top pixel hidden', pw: 4.5, ph: 4.0, ox: 0, oy: 56, hide: 1, id: 22, payload: feed(25) },
+  { name: 'full-size batch, 4.5 x 4.0, top pixel hidden', pw: 4.5, ph: 4.0, ox: 0, oy: 56, hide: 1, id: 23, payload: feed(60) },
+  { name: 'exact 4 x 4, top pixel hidden', pw: 4, ph: 4, ox: 0, oy: 56, hide: 1, id: 24, payload: feed(25) },
   { name: 'exact 4 x 4 still works', pw: 4, ph: 4, ox: 0, oy: 10, id: 17, payload: feed(25) },
 ];
 
@@ -122,6 +128,15 @@ for (const t of cases) {
 // A real capture (cropped to the strip): it must pass the strip's own checksum and carry the message fields.
 const real = decode(path.join(__dirname, 'fixtures', 'mac_scaled_strip.png'));
 check('real capture of the Forever window', typeof real.id === 'number' && typeof real.text === 'string' && real.text.split('\x1F').length >= 7, `got ${JSON.stringify(real).slice(0, 200)}`);
+
+// Part of the strip hidden (the macOS Dock over the left edge): rejected, never read as a different message.
+{
+  const cells = encodeWithLua(31, feed(25));
+  const f = path.join(TMP, 'scaled_covered.png');
+  fs.writeFileSync(f, render(cells, { pw: 4.5, ph: 4.0, ox: 0, oy: 56, hide: 1, cover: { w: 34, fromY: 70 } }));
+  const res = decode(f);
+  check('left edge covered is rejected', !!res.error && !res.id, `got ${JSON.stringify(res).slice(0, 200)}`);
+}
 
 // Nothing drawn: no strip, and not a false one.
 const empty = path.join(TMP, 'scaled_none.png');

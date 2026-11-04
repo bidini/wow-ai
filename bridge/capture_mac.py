@@ -143,19 +143,6 @@ def row_agreement(px, width, height, ox, oy, pw):
     return hit
 
 
-def column_agreement(px, width, height, ox, oy, pw, ph, rows):
-    """How many sampled cells are one color at three places down the cell, over all rows."""
-    hit = 0
-    for r in range(rows):
-        y = oy + (r + 0.5) * ph
-        for c in range(0, CELLS, 5):
-            x = ox + (c + 0.5) * pw
-            a = cell_at(px, width, height, x, y - 0.3 * ph)
-            if a == cell_at(px, width, height, x, y) == cell_at(px, width, height, x, y + 0.3 * ph):
-                hit += 1
-    return hit
-
-
 def best_pitch(candidates, score):
     """The middle of the largest group of neighbouring pitches that score best. Neighbours read alike,
     so the best score is a plateau; a half or a third of the true pitch scores as well (cells cut in
@@ -171,13 +158,66 @@ def best_pitch(candidates, score):
     return candidates[group[len(group) // 2]]
 
 
-def estimate_ph(px, width, height, ox, oy, pw, rows):
-    """Row height: a coarse pass over the first rows, then a fine pass over all of them."""
-    coarse = [PITCH_MIN + i * 0.05 for i in range(int((PITCH_MAX - PITCH_MIN) / 0.05) + 1)]
-    first = min(rows, 8)
-    ph0 = best_pitch(coarse, lambda ph: column_agreement(px, width, height, ox, oy, pw, ph, first))
-    fine = [ph0 - 0.15 + i * PITCH_STEP_Y for i in range(31)]
-    return best_pitch(fine, lambda ph: column_agreement(px, width, height, ox, oy, pw, ph, rows))
+def row_boundaries(px, width, height, ox, oy, pw, rows):
+    """y of each row boundary below the strip's first row, found where the colors of many columns change at
+    once. The top of the first row can be clipped by the window border, so the boundaries, not the
+    top edge, say where the rows are."""
+    xs = [min(width - 1, int(ox + (c + 0.5) * pw)) for c in range(0, CELLS, 2)]
+    ymax = min(height - 1, oy + int(rows * PITCH_MAX) + 2)
+    counts = {}
+    prev = [cell_at(px, width, height, x, oy) for x in xs]
+    for y in range(oy + 1, ymax + 1):
+        cur = [cell_at(px, width, height, x, y) for x in xs]
+        n = sum(1 for p, q in zip(prev, cur) if p != q)
+        if n:
+            counts[y] = n
+        prev = cur
+    if not counts:
+        return []
+    strong = sorted(y for y, n in counts.items() if n >= 0.4 * max(counts.values()))
+    clusters, group = [], []
+    for y in strong:
+        if group and y - group[-1] > 1:
+            clusters.append(group)
+            group = []
+        group.append(y)
+    if group:
+        clusters.append(group)
+    return [sum(y * counts[y] for y in g) / sum(counts[y] for y in g) for g in clusters][:rows - 1]
+
+
+def fit_rows(bounds):
+    """(top of row 0, row height) from the boundaries, by a line through (row number, y)."""
+    if len(bounds) < 2:
+        return None
+    gaps = sorted(b - a for a, b in zip(bounds, bounds[1:]))
+    step = gaps[len(gaps) // 2]
+    if step < PITCH_MIN:
+        return None
+    ks = [1]  # one boundary after another; a gap of about two steps means one boundary showed no change
+    for a, b in zip(bounds, bounds[1:]):
+        ks.append(ks[-1] + max(1, round((b - a) / step)))
+    n = len(ks)
+    mk, my = sum(ks) / n, sum(bounds) / n
+    var = sum((k - mk) ** 2 for k in ks)
+    if var == 0:
+        return None
+    ph = sum((k - mk) * (y - my) for k, y in zip(ks, bounds)) / var
+    return my - ph * mk, ph
+
+
+def row_geometries(px, width, height, ox, oy, pw, rows):
+    """(top, row height) guesses for a strip of `rows` rows, best first; the checksum picks the right one."""
+    bounds = row_boundaries(px, width, height, ox, oy, pw, rows)
+    out = []
+    fit = fit_rows(bounds)
+    if fit:
+        out.append(fit)
+    if bounds:
+        for ph in (bounds[0] - oy, pw, 0.9 * pw):
+            if ph >= PITCH_MIN:
+                out += [(oy, ph), (bounds[0] - ph, ph)]
+    return out
 
 
 def find_and_decode(px, width, height, hint):
@@ -208,11 +248,17 @@ def find_and_decode(px, width, height, hint):
             if not rows:
                 seen = seen or {"error": "length"}
                 continue
-            ph = estimate_ph(px, width, height, ox, oy, pw, rows) if rows > 1 else None
-            msg = decode(px, width, height, ox, oy, pw, ph or 2.0)
-            if msg and not msg.get("error"):
-                return msg, (ox, oy, pw, ph)
-            seen = seen or msg
+            if rows == 1:
+                msg = decode(px, width, height, ox, oy, pw, 2.0)
+                if msg and not msg.get("error"):
+                    return msg, (ox, oy, pw, None)
+                seen = seen or msg
+                continue
+            for top, ph in row_geometries(px, width, height, ox, oy, pw, rows):
+                msg = decode(px, width, height, ox, top, pw, ph)
+                if msg and not msg.get("error"):
+                    return msg, (ox, top, pw, ph)
+                seen = seen or msg
     return seen, hint
 
 
@@ -451,7 +497,8 @@ def run():
             if msg and msg.get("error"):
                 if time.time() - last_warn >= 5:
                     last_warn = time.time()
-                    emit({"warn": "strip seen but rejected: " + msg["error"]})
+                    emit({"warn": "strip seen but rejected: " + msg["error"]
+                          + " (part of the strip may be hidden: check the top-left corner of the game window for the Dock or another window)"})
             elif msg:
                 key = "%d:%s" % (msg["id"], msg["text"])
                 if key != last_key:
