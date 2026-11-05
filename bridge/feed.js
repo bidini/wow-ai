@@ -324,6 +324,11 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       fs.appendFileSync(path.join(folder, name), lines.join('\n') + '\n', { mode: 0o644 });
     }
   }
+  // One line in a daily file of the character's own (the coach's checks), under the day it happened.
+  function logLine(name, t, obj) {
+    if (!dailyLog) return;
+    try { dailyAppend(name, [{ t, line: JSON.stringify(obj) }]); } catch (err) { log(`feed: ${name} not written (${err.code || err.message})`); }
+  }
   function applyToDay(e, t) {
     const d = dayFor(dateOf(t));
     d.first = d.first === null ? t : Math.min(d.first, t);
@@ -431,7 +436,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
     writeAtomic('summary.txt', summary(rx) + '\n');
     log(`feed #${job.id}: ${p.snapshot ? 'snapshot, ' : ''}${p.events.length} event(s), ${p.samples.length} position(s)` +
       `${gap ? `, ${gap} batch(es) missed before it` : ''}${p.unknown ? `, ${p.unknown} unreadable line(s)` : ''}`);
-    return { dup: false, events: p.events.length, samples: p.samples.length, gap };
+    return { dup: false, events: p.events.length, types: p.events.map(e => e.type), samples: p.samples.length, gap };
   }
 
   // The picture of the game right now, short enough to ride in every system prompt.
@@ -509,7 +514,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
     ].filter(Boolean).join('\n');
   }
 
-  return { ingest, summary, block, state: mem, dir, atlas };
+  return { ingest, summary, block, logLine, state: mem, dir, atlas };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -609,7 +614,7 @@ function createFeedHub({ dir, store = {}, log = () => {}, now = () => Date.now()
     if (!r.dup) {
       try { touch(key, who, feed, rx); } catch (e) { log(`feed: character index not written (${e.code || e.message})`); }
     }
-    return r;
+    return { ...r, key };
   }
 
   function activeFeed() { return index.active ? feedFor(index.active) : null; }
@@ -630,8 +635,10 @@ function createFeedHub({ dir, store = {}, log = () => {}, now = () => Date.now()
     return lines.join('\n');
   }
 
+  function logLine(key, name, t, obj) { feedFor(key).logLine(name, t, obj); }
+
   return {
-    ingest, summary, block, atlas, dir,
+    ingest, summary, block, logLine, atlas, dir,
     get active() { return index.active; },
     get state() { const f = activeFeed(); return f ? f.state : { lastRx: 0 }; },
   };
