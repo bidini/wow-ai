@@ -111,6 +111,9 @@ const cases = [
   { name: 'several rows, 4.5 x 4.0, top pixel hidden', pw: 4.5, ph: 4.0, ox: 0, oy: 56, hide: 1, id: 22, payload: feed(25) },
   { name: 'full-size batch, 4.5 x 4.0, top pixel hidden', pw: 4.5, ph: 4.0, ox: 0, oy: 56, hide: 1, id: 23, payload: feed(60) },
   { name: 'exact 4 x 4, top pixel hidden', pw: 4, ph: 4, ox: 0, oy: 56, hide: 1, id: 24, payload: feed(25) },
+  // The addon starts the strip 96 px right of the corner on a Mac, and the Dock covers the window's left edge below row 3.
+  { name: 'strip 96 px from the left, Dock over the edge', pw: 4.5, ph: 4.0, ox: 96, oy: 56, hide: 1, cover: { w: 80, fromY: 70 }, id: 25, payload: feed(60), width: 1200 },
+  { name: 'strip 40 px from the left, 4 x 4, Dock over the edge', pw: 4, ph: 4, ox: 40, oy: 56, hide: 1, cover: { w: 34, fromY: 70 }, id: 26, payload: feed(25), width: 1100 },
   { name: 'exact 4 x 4 still works', pw: 4, ph: 4, ox: 0, oy: 10, id: 17, payload: feed(25) },
 ];
 
