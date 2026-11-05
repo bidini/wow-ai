@@ -32,6 +32,7 @@ local PRESENCE_MAX = 2000 -- presence/0001..2000.wav, one flipped by the bridge 
 local COACH_MAX = 400 -- coach/0001..0400.wav, the next one is flipped by the bridge when a coach tip is waiting (docs/COACH.md)
 local STRIP_TRIES = 3 -- re-show an unacknowledged message this many times before falling back
 local CELL, CELLS_PER_ROW, MAX_ROWS = 4, 200, 48
+local STRIP_MARGIN_MAC = 96 -- UI units (about pixels) between the window's left edge and the strip on a Mac client
 local STRIP_SECONDS = 40 -- max per message; it leaves the strip as soon as the bridge acknowledges
 local POLL_SCHEDULE = { 5, 10, 16, 24, 34, 46, 60, 80, 100, 130, 160, 200, 240, 300 }
 local POLL_TAIL = 60
@@ -332,7 +333,10 @@ local function EnsureStrip()
 	end
 	if strip.SetIgnoreParentScale then strip:SetIgnoreParentScale(true) end
 	strip:SetScale(768 / physH)
-	strip:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
+	-- On a Mac the Dock often sits over the window's left edge and hides the first cells of the lower rows,
+	-- so the strip starts a little to the right of the corner; the capture finds it wherever it begins.
+	local margin = (IsMacClient and IsMacClient()) and STRIP_MARGIN_MAC or 0
+	strip:SetPoint("TOPLEFT", UIParent, "TOPLEFT", margin, 0)
 	strip:SetSize(CELLS_PER_ROW * CELL, MAX_ROWS * CELL)
 	strip:Hide()
 	return strip

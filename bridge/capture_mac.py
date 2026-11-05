@@ -44,7 +44,7 @@ args = p.parse_args()
 
 CELL, CELLS, MAXROWS = args.cell, args.cells, args.max_rows
 W, H = CELLS * CELL, MAXROWS * CELL
-XSLACK = 8
+XSLACK = 160  # the addon starts the strip a little right of the corner on a Mac (the Dock covers the edge)
 YSLACK = args.y_slack
 
 
@@ -237,7 +237,9 @@ def find_and_decode(px, width, height, hint):
         for ox in range(XSLACK + 1):
             if oy + 1 >= height or ox + 1 >= width:
                 continue
-            if not (is_yellow(px(ox + 1, oy)) and is_yellow(px(ox + 1, oy + 1))):
+            if not (is_yellow(px(ox, oy + 1)) and is_yellow(px(ox + 1, oy)) and is_yellow(px(ox + 1, oy + 1))):
+                continue
+            if ox > 0 and is_yellow(px(ox - 1, oy + 1)):  # the strip's left edge, not a column inside its first cell
                 continue
             if oy > 0 and is_yellow(px(ox + 1, oy - 1)):  # the strip's top row, not one below it
                 continue
