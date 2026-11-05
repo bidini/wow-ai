@@ -6,6 +6,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Fixed
 
+- macOS capture finds the game window in the window server's list (by process id; the window's owner is called `Wow`, not `World of Warcraft`), so it no longer needs the Accessibility permission that macOS keeps dropping for the terminal app ("osascript is not allowed assistive access"). System Events stays as the fallback.
 - macOS capture of strips with several rows: the row height is read from where the colors change between rows (4 px rows next to 4.5 px columns on the first Forever login; the window border can also hide the top pixel of the first row), not guessed from the column width. A strip with part of it covered, such as the Dock over the left edge, is still rejected, and the warning says to check the corner.
 - macOS capture: the strip is read at the cell size the picture actually has. On the first Forever login the window drew cells about 4.5 pixels wide and 2.8 tall, not 4, so the capture saw the strip but rejected it ("strip seen but rejected: length"). `capture_mac.py` now measures the cell width from the strip's known first cells and the row height from the rows themselves (2 to 10 pixels), and keeps the result until the strip is lost. `tests/capture_scale_test.js` covers odd scales, blurred edges and a real capture. The Windows and Linux readers are unchanged.
 
