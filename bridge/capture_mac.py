@@ -32,6 +32,8 @@ p.add_argument("--interval-ms", type=int, default=250)
 p.add_argument("--process-name", default="World of Warcraft")
 p.add_argument("--window-name", default="")
 p.add_argument("--test-image", default="")
+p.add_argument("--test-windows", default="")   # a saved window list (JSON): print the window that would be captured
+p.add_argument("--pids", default="")
 p.add_argument("--probe", default="")
 # macOS specific: how many pixels to search down for the strip (title bar + menu bar)
 p.add_argument("--y-slack", type=int, default=80, help="vertical search margin in physical pixels")
@@ -341,14 +343,15 @@ if args.test_image:
 # macOS window discovery and screen capture
 # ---------------------------------------------------------------------------
 
-def run_osascript(script):
-    """Write the AppleScript to a temp file and run it; multi-line scripts are
+def run_osascript(script, javascript=False):
+    """Write the script to a temp file and run it; multi-line AppleScript is
     unreliable when passed inline to osascript -e."""
-    fd, path = tempfile.mkstemp(suffix=".scpt")
+    fd, path = tempfile.mkstemp(suffix=".js" if javascript else ".scpt")
     try:
         with os.fdopen(fd, "w") as fh:
             fh.write(script)
-        proc = subprocess.run(["osascript", path], capture_output=True, text=True, timeout=10)
+        cmd = ["osascript", "-l", "JavaScript", path] if javascript else ["osascript", path]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
     finally:
         try:
             os.unlink(path)
@@ -359,8 +362,61 @@ def run_osascript(script):
     return proc.stdout.strip()
 
 
+# The window list the window server keeps (CoreGraphics) gives every on-screen window's owner and
+# frame without the Accessibility permission that System Events needs: that permission belongs to the
+# app that started the bridge and macOS drops it now and then. The owner is the executable's name
+# ("Wow"), not the app's, so the game is found by process id.
+CG_WINDOWS = """ObjC.import('CoreGraphics'); ObjC.import('Foundation');
+const raw = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, 0);
+const list = ObjC.deepUnwrap(ObjC.castRefToObject(raw));
+JSON.stringify(list.filter(w => w.kCGWindowLayer === 0 && w.kCGWindowBounds).map(w => ({
+  pid: w.kCGWindowOwnerPID, owner: w.kCGWindowOwnerName || '', name: w.kCGWindowName || '',
+  x: w.kCGWindowBounds.X, y: w.kCGWindowBounds.Y, w: w.kCGWindowBounds.Width, h: w.kCGWindowBounds.Height })));"""
+
+
+def process_ids(name):
+    """Ids of the processes whose command path contains `name` (case-insensitive)."""
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,comm="], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return set()
+    ids = set()
+    for line in out.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and name.lower() in parts[1].lower():
+            ids.add(int(parts[0]))
+    return ids
+
+
+def pick_window(windows, pids, name, title=""):
+    """(x, y, w, h) of the largest layer-0 window of the game, by process id or else by owner name."""
+    best = None
+    for win in windows:
+        mine = win.get("pid") in pids or (name and name.lower() in str(win.get("owner", "")).lower())
+        if not mine or (title and title not in str(win.get("name", ""))):
+            continue
+        if win.get("w", 0) < 100 or win.get("h", 0) < 100:
+            continue
+        if best is None or win["w"] * win["h"] > best["w"] * best["h"]:
+            best = win
+    return (int(best["x"]), int(best["y"]), int(best["w"]), int(best["h"])) if best else None
+
+
+def find_window_bounds_cg():
+    return pick_window(json.loads(run_osascript(CG_WINDOWS, javascript=True) or "[]"),
+                       process_ids(args.process_name), args.process_name, args.window_name)
+
+
 def find_window_bounds():
     """Return (x, y, w, h) in screen points for the best matching window."""
+    try:
+        return find_window_bounds_cg()
+    except Exception as err:  # the window list is unavailable: ask System Events (needs Accessibility)
+        sys.stderr.write("window list failed (%s); trying System Events\n" % str(err).strip()[:120])
+    return find_window_bounds_system_events()
+
+
+def find_window_bounds_system_events():
     want = args.process_name
     title = args.window_name
 
@@ -441,6 +497,11 @@ def grab(out_path):
         return {"error": "screencapture failed: %s" % e}
     return read_png(out_path)
 
+
+if args.test_windows:
+    pids = {int(x) for x in args.pids.split(",") if x.strip()}
+    emit({"bounds": pick_window(json.load(open(args.test_windows)), pids, args.process_name, args.window_name)})
+    sys.exit(0)
 
 def run():
     if args.probe:
