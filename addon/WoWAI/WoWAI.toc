@@ -13,3 +13,4 @@ Map.lua
 Feed.lua
 Code.lua
 Shop.lua
+Coach.lua

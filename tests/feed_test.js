@@ -59,7 +59,7 @@ test('parsePayload survives garbage: unknown lines are counted, bad numbers beco
 test('ingest writes events, trajectory, snapshot and summary files the agent can read', () => {
   const t = setup();
   const r = t.feed.ingest(job(payload()));
-  assert.deepEqual(r, { dup: false, events: 2, samples: 2, gap: 0 });
+  assert.deepEqual(r, { dup: false, events: 2, types: ['qaccept', 'level'], samples: 2, gap: 0 });
   const ev = lines(path.join(t.state, 'events.jsonl'));
   assert.equal(ev.length, 2);
   assert.equal(ev[0].type, 'qaccept');

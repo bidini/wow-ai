@@ -32,6 +32,7 @@ const P = require('./protocol'); // the pure protocol code, unit-tested in tests
 const A = require('./agents');   // how each agent is launched and read, unit-tested in tests/agents_test.js
 const Code = require('./code');  // agent-proposed addon code: checked, put in a slot for the player to load (docs/CODE.md)
 const Lint = require('./lint');
+const Coach = require('./coach'); // when to ask the agent for a tip, and what counts as one (docs/COACH.md)
 const Feed = require('./feed');  // the event feed: files and a prompt summary built from what the addon reports (docs/EVENTS.md)
 
 const HERE = __dirname;
@@ -60,7 +61,7 @@ const injectIdx = argv.indexOf('--inject');
 const inject = injectIdx >= 0 ? argv[injectIdx + 1] : null;
 const agentIdx = argv.indexOf('--agent');
 const injectAgent = agentIdx >= 0 ? argv[agentIdx + 1] : '';
-const exitWhenIdle = once || inject !== null;
+let exitWhenIdle = once || inject !== null;
 const injectFeedIdx = argv.indexOf('--inject-feed');
 const injectFeed = injectFeedIdx >= 0 ? argv[injectFeedIdx + 1] : null;
 const feedIdIdx = argv.indexOf('--feed-id');
@@ -139,6 +140,13 @@ const codePool = CODE_CFG.enabled === true
   ? Code.createPool({ addonDir: cfg.addonDir, auditDir: path.join(FEED_DIR, 'code'), store: state.code, slots: CODE_CFG.slots, maxBytes: CODE_CFG.maxBytes, log: (...a) => log(...a) })
   : null;
 const CODE_HINT = codePool ? P.codeHint(Lint.describe()) : '';
+
+// The coach (docs/COACH.md): every few game events the bridge asks the agent, on its own, whether the
+// player forgot something or could do better. "coach": { "enabled": false } turns it off. The ids and the
+// last tips live in state.json.
+if (!state.coach) state.coach = {};
+const coach = feed ? Coach.createCoach(cfg.coach || {}, { store: state.coach }) : null;
+const COACH_JOB_BASE = 2000000000;   // never an addon message id
 
 // Bridge-side transcripts. The beta client sometimes wipes addon saved data; since
 // every prompt and reply passes through here, this copy lets the addon recover.
@@ -468,7 +476,10 @@ function submit(job) {
     if (!feed) return;
     try {
       const r = feed.ingest(job);
-      if (!r.dup) saveState();
+      if (!r.dup) {
+        saveState();
+        if (coach && coach.note(r.key, r.types)) maybeCoach();
+      }
     } catch (e) { log(`feed: could not store #${job.id}: ${e.message}`); }
     return;
   }
@@ -522,9 +533,11 @@ function runJob(job) {
   const cwd = resolveCwd(job.cwd);
   job.cwd = cwd;
   const tag = `#${job.id}${job.session ? '@' + job.session : ''}`;
-  signal('sig', job.id, false);
-  resetBeats(job.id);
-  signal('ack', job.id, true);
+  if (!job.coach) {
+    signal('sig', job.id, false);
+    resetBeats(job.id);
+    signal('ack', job.id, true);
+  }
   if (!fs.existsSync(cwd)) {
     log(`${tag} cwd does not exist: ${cwd}`);
     const sibs = siblingFolders();
@@ -569,14 +582,16 @@ function runJob(job) {
     const added = allowRules(agentId, job.allow);
     log(`${tag} allowed for ${agentId}: ${job.allow.join(', ')}${added.length ? '' : ' (already allowed)'}`);
   }
-  maybeOfferRestore(job);
-  noteMessage(job, 'user', job.text);
+  if (!job.coach) {
+    maybeOfferRestore(job);
+    noteMessage(job, 'user', job.text);
+  }
   const resume = state.sessions[skey] || state.sessions[key];
 
   const ctx = gameContext();
   const liveFeed = feed ? feed.block() : '';
-  const system = P.systemPrompt(ctx, primer(), liveFeed, CODE_HINT);
-  const systemShort = P.systemPrompt(ctx, '', liveFeed, CODE_HINT);
+  const system = job.coach ? Coach.systemPrompt(liveFeed) : P.systemPrompt(ctx, primer(), liveFeed, CODE_HINT);
+  const systemShort = job.coach ? system : P.systemPrompt(ctx, '', liveFeed, CODE_HINT);
   const promptFile = path.join(TMP_DIR, `prompt-${job.id}-${Date.now().toString(36)}.txt`);
   const input = agent.input({ prompt: job.text, system, systemShort, resume, cfg: acfg });
   if (input.promptFile !== undefined) {
@@ -585,20 +600,22 @@ function runJob(job) {
   }
   const args = [...cmd.args, ...agent.args({
     cfg: acfg, resume, cwd, system, systemShort, promptFile,
-    prompt: job.text, timeoutMs: cfg.timeoutMs,
+    prompt: job.text, timeoutMs: job.timeoutMs || cfg.timeoutMs,
   })];
   const env = agent.env({ ...process.env });
   // Where this run's tools append map commands (docs/MAP.md); any agent can use it.
-  try {
-    fs.mkdirSync(MAP_DIR, { recursive: true });
-    fs.rmSync(mapFileFor(job), { force: true });
-    env.WOW_AI_MAP_FILE = mapFileFor(job);
-  } catch (e) { log(`${tag} map file unavailable: ${e.message}`); }
+  if (!job.coach) {
+    try {
+      fs.mkdirSync(MAP_DIR, { recursive: true });
+      fs.rmSync(mapFileFor(job), { force: true });
+      env.WOW_AI_MAP_FILE = mapFileFor(job);
+    } catch (e) { log(`${tag} map file unavailable: ${e.message}`); }
+  }
 
   log(`${tag} (${job.via}) ${agent.name} starting in ${cwd}${resume ? ' (resume ' + resume.slice(0, 8) + ')' : ' (new session)'}${ctx ? ' [game context]' : ''}${running.size ? ' [' + (running.size + 1) + ' running]' : ''}`);
   const child = spawn(cmd.file, args, { cwd, env, windowsHide: true, stdio: [input.stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
   running.set(key, { job, child });
-  publish(key, { chat: job.chat, id: job.id, status: 'working', text: resume ? 'thinking...' : 'starting a new session...', cwd, session: resume, agent: agentId }, true);
+  if (!job.coach) publish(key, { chat: job.chat, id: job.id, status: 'working', text: resume ? 'thinking...' : 'starting a new session...', cwd, session: resume, agent: agentId }, true);
   if (input.stdin !== undefined) { child.stdin.on('error', () => {}); child.stdin.end(input.stdin); }
 
   const parser = agent.parser();
@@ -615,6 +632,7 @@ function runJob(job) {
   const pushProgress = (line) => {
     progress.push(line);
     while (progress.length > 10) progress.shift();
+    if (job.coach) return;   // a check runs silently; only its tip is shown
     beat(job);
     publish(key, { chat: job.chat, id: job.id, status: 'working', text: progress.join('\n'), cwd, session: sessionId, agent: agentId }, false);
   };
@@ -665,9 +683,9 @@ function runJob(job) {
   child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
 
   const timer = setTimeout(() => {
-    log(`${tag} timed out after ${cfg.timeoutMs} ms, killing`);
+    log(`${tag} timed out after ${job.timeoutMs || cfg.timeoutMs} ms, killing`);
     killTree(child);
-  }, cfg.timeoutMs || 1800000);
+  }, job.timeoutMs || cfg.timeoutMs || 1800000);
 
   const cleanup = () => {
     clearTimeout(timer);
@@ -693,7 +711,7 @@ function runJob(job) {
       }
     }
     if (buffer.trim()) handleLine(buffer.trim());
-    if (sessionId) {
+    if (sessionId && !job.coach) {
       state.sessions[skey] = sessionId;
       (state.sessionCwd = state.sessionCwd || {})[skey] = cwd;
       (state.sessionAgent = state.sessionAgent || {})[skey] = agentId;
@@ -717,6 +735,7 @@ function runJob(job) {
 function finish(job, status, text, session, denied) {
   if (job.finished) return; // spawn failures fire both 'error' and 'close'
   job.finished = true;
+  if (job.coach) { finishCoach(job, status, text); return; }
   running.delete(chatKey(job));
   markHandled(job);
   saveState();
@@ -747,6 +766,59 @@ function finish(job, status, text, session, denied) {
   publish(chatKey(job), { chat: job.chat, id: job.id, status, text, summary, cwd: job.cwd, session, denied, macros, shop, agent: job.agent || '' }, true);
   signal('sig', job.id, true);
   log(`#${job.id}${job.session ? '@' + job.session : ''} ${status} (${text.length} chars${summary ? ', summary ' + summary.length : ', no summary'})`);
+  drainQueue();
+  if (exitWhenIdle && running.size === 0) process.exit(status === 'done' ? 0 : 1);
+}
+
+// ---------------------------------------------------------------------------
+// The coach
+// ---------------------------------------------------------------------------
+
+// Starts a check when enough events have come in and nothing blocks it; called when a batch arrives and
+// every 15 s (a check that was held back for the minimum distance starts as soon as it may).
+function maybeCoach() {
+  if (!coach || coach.blocked() || running.size >= MAX_PARALLEL) return;
+  const run = coach.begin();
+  if (!run) return;
+  log(`coach #${run.id}: ${run.events} new event(s), asking the agent`);
+  runJob({ id: COACH_JOB_BASE + run.id, chat: 'coach', session: 'coach', text: run.prompt, cwd: '', newSession: true, via: 'coach', coach: true, coachRun: run, timeoutMs: coach.config.timeoutMs, agent: '' });
+}
+
+// The game watches coach/NNNN.wav the way it watches presence: the next file turning valid means a tip is waiting.
+const COACH_MAX = cfg.coachMax || 400;
+function coachFile(k) { return path.join(cfg.addonDir, 'WoWAI', 'coach', String(k).padStart(4, '0') + '.wav'); }
+function coachBeat() {
+  if (!fs.existsSync(path.join(cfg.addonDir, 'WoWAI', 'coach'))) return;
+  state.coachSig = ((state.coachSig || 0) % COACH_MAX) + 1;
+  const k = state.coachSig;
+  try { atomicWrite(coachFile(k), SILENT_WAV); } catch {}
+  // The valid files form a prefix: what lies ahead stays empty (all of it after a wrap).
+  const ahead = k === 1 ? COACH_MAX - 1 : 50;
+  for (let j = 1; j <= ahead; j++) {
+    try { atomicWrite(coachFile(((k - 1 + j) % COACH_MAX) + 1), Buffer.alloc(0)); } catch {}
+  }
+}
+
+function finishCoach(job, status, text) {
+  const run = job.coachRun;
+  running.delete(chatKey(job));
+  coach.end();
+  const at = Date.now();
+  if (status === 'done') {
+    const tip = coach.accept(run.key, run.id, text, at);
+    saveState();
+    if (feed) feed.logLine(run.key, 'coach.jsonl', at, { t: at, id: run.id, events: run.events, tip: tip ? tip.text : null });
+    if (tip) {
+      publish('coach:tip', { chat: 'coach', id: tip.id, status: 'done', text: tip.text, coach: true, at: tip.t, cwd: '', session: '', agent: '' }, true);
+      coachBeat();
+      saveState();
+      log(`coach #${run.id}: tip (${tip.text.length} chars): ${tip.text.split('\n')[0].slice(0, 90)}`);
+    } else {
+      log(`coach #${run.id}: nothing to say`);
+    }
+  } else {
+    log(`coach #${run.id}: check failed: ${String(text).split('\n')[0].slice(0, 160)}`);
+  }
   drainQueue();
   if (exitWhenIdle && running.size === 0) process.exit(status === 'done' ? 0 : 1);
 }
@@ -834,6 +906,7 @@ function banner() {
   const ctx = gameContext();
   console.log(`  context  : ${cfg.gameContext === false ? 'off (gameContext in config.json)' : ctx ? (ctx.split('\n').find(l => /^Character:/i.test(l)) || ctx.split('\n')[0]).slice(0, 100) : 'none yet (the addon sends it with its hello; /wow-ai context in game)'}`);
   console.log(`  feed     : ${feed ? FEED_DIR + (feed.state.lastRx ? ' (last update ' + Feed.ago(Date.now() - feed.state.lastRx) + ' ago)' : ' (nothing received yet)') : 'off (feed.enabled in config.json)'}`);
+  console.log(`  coach    : ${coach ? (coach.config.enabled ? 'on: a check every ' + coach.config.everyEvents + ' events (at most one a ' + coach.config.minSeconds + ' s and ' + coach.config.maxPerHour + ' an hour)' : 'off (coach.enabled in config.json)') : 'off (needs the feed)'}`);
   console.log(`  code     : ${codePool ? 'on, ' + CODE_CFG.slots + ' slots (the player loads each piece by hand; audit trail in ' + path.join(FEED_DIR, 'code') + ')' : 'off (code.enabled in config.json)'}`);
   console.log(`  primer   : ${!PRIMER_FILE ? 'off (primerFile in config.json)' : primer() ? path.resolve(REPO, PRIMER_FILE) + ' (' + primer().length + ' chars, with the context)' : 'NOT FOUND: ' + path.resolve(REPO, PRIMER_FILE)}`);
   console.log('Leave this window open while you play. Ctrl+C to stop.\n');
@@ -844,7 +917,8 @@ if (injectFeed !== null) {
   let payload;
   try { payload = fs.readFileSync(injectFeed, 'utf8'); } catch (e) { console.error(`cannot read ${injectFeed}: ${e.message}`); process.exit(1); }
   submit({ session: 'inject', chat: '', id: injectFeedId, cwd: '', event: true, name: '', text: payload, via: 'inject' });
-  process.exit(0);
+  if (running.size === 0) process.exit(0);
+  exitWhenIdle = true;   // a coach check started by this payload: wait for it
 } else if (inject !== null) {
   submit({ id: state.lastId + 1, session: '', chat: '', text: inject, cwd: '', newSession: false, via: 'inject', agent: injectAgent || '' });
 } else {
@@ -855,6 +929,7 @@ if (injectFeed !== null) {
     setInterval(pollSavedVariables, cfg.pollMs || 750);
     presenceBeat();
     setInterval(presenceBeat, cfg.presenceIntervalMs || 30000);
+    setInterval(maybeCoach, 15000);
     if (cap.enabled) startCapture();
   }
 }
