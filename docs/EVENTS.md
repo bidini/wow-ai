@@ -1,6 +1,6 @@
 # Event feed
 
-The addon tells the bridge what happens in the game: quests accepted, ready and turned in, new zones, level-ups, deaths, and where you walk. The bridge writes it to files and puts a short summary into the agent's system prompt, so the agent knows your recent history and path **without you typing it and without an agent run per event** (the coach, [COACH.md](COACH.md), starts one check per few events and answers only when it has something to say). Nothing here moves, targets, casts or acts for you; it only reads game state and draws.
+The addon tells the bridge what happens in the game: quests accepted, ready and turned in, new zones, level-ups, deaths, and where you walk. The bridge writes it to files and puts a short summary into the agent's system prompt, so the agent knows your recent history and path **without you typing it and without an agent run per event** (the reminder, [REMINDER.md](REMINDER.md), starts one check per few events and answers only when it has something to say). Nothing here moves, targets, casts or acts for you; it only reads game state and draws.
 
 ```
  game events ─▶ Feed.lua ─▶ pixel strip (flag "e") ─▶ capture ─▶ bridge/feed.js ─▶ <folder>/state/*.json[l]

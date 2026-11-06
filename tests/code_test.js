@@ -335,7 +335,7 @@ test('bridge: the banner says whether the code pool is on', () => {
   const SRC = path.join(__dirname, '..', 'bridge');
   const run = code => {
     const S = fs.mkdtempSync(path.join(os.tmpdir(), 'code-bridge-'));
-    for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js', 'code.js', 'lint.js', 'coach.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
+    for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js', 'code.js', 'lint.js', 'reminder.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
     fs.symlinkSync(path.join(__dirname, '..', 'node_modules'), path.join(S, 'node_modules'));
     fs.mkdirSync(path.join(S, 'addons', 'WoWAI'), { recursive: true });
     fs.mkdirSync(path.join(S, 'proj'), { recursive: true });

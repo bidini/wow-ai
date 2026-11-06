@@ -21,7 +21,7 @@ function stripX(isMac) {
   };
   load(fs.readFileSync(path.join(__dirname, 'wow_stub.lua'), 'utf8'));
   if (isMac !== null) load(`IsMacClient = function() return ${isMac} end`);
-  for (const f of ['Codec.lua', 'Inbox.lua', 'WoWAI.lua', 'Map.lua', 'Feed.lua', 'Code.lua', 'Shop.lua', 'Coach.lua']) load(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'WoWAI');
+  for (const f of ['Codec.lua', 'Inbox.lua', 'WoWAI.lua', 'Map.lua', 'Feed.lua', 'Code.lua', 'Shop.lua', 'Reminder.lua']) load(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'WoWAI');
   load('STUB.FireEvent("ADDON_LOADED", "WoWAI")');
   load('STUB.FireEvent("PLAYER_LOGIN")');
   load('SlashCmdList.WOWAI("hello strip")');

@@ -350,7 +350,7 @@ function luaTable(globalName, records, opts = {}) {
     lines.push(`\t\t\tsession = ${luaStr(r.session || '')},`);
     lines.push(`\t\t\tagent = ${luaStr(r.agent || '')},`);
     if (r.summary) lines.push(`\t\t\tsummary = ${luaStr(r.summary)},`);
-    if (r.coach) lines.push('\t\t\tcoach = true,', `\t\t\tat = ${Math.floor(Number(r.at) / 1000) || 0},`);
+    if (r.reminder) lines.push('\t\t\treminder = true,', `\t\t\tat = ${Math.floor(Number(r.at) / 1000) || 0},`);
     if (Array.isArray(r.denied) && r.denied.length) {
       lines.push(`\t\t\tdenied = { ${r.denied.map(luaStr).join(', ')} },`);
     }

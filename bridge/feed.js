@@ -324,7 +324,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       fs.appendFileSync(path.join(folder, name), lines.join('\n') + '\n', { mode: 0o644 });
     }
   }
-  // One line in a daily file of the character's own (the coach's checks), under the day it happened.
+  // One line in a daily file of the character's own (the reminder's checks), under the day it happened.
   function logLine(name, t, obj) {
     if (!dailyLog) return;
     try { dailyAppend(name, [{ t, line: JSON.stringify(obj) }]); } catch (err) { log(`feed: ${name} not written (${err.code || err.message})`); }

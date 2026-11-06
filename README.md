@@ -127,7 +127,7 @@ Right-clicking a chat in the left panel opens a small menu with **Rename...**, *
 | `/wow-ai cd <folder>` | folder this chat's agent works in (**Folder...** after right-clicking the chat opens the same thing as a dialog). Relative to the bridge's folder (`/wow-ai cd realms`, `/wow-ai cd ../other`), `~` works, a full path too; `/wow-ai cd` alone goes back to the bridge's default. A chat that changes folder starts a fresh session there |
 | `/wow-ai reset` | wipe this chat's agent memory, keep the transcript |
 | `/wow-ai context [on\|off]` | show what the agent is told about your character and location, or turn it on/off |
-| `/wow-ai coach [clear]` | the tips the coach gave while you played; it asks the agent every few events and only speaks up when there is something worth saying ([docs/COACH.md](docs/COACH.md)) |
+| `/wow-ai reminder [clear]` | the tips the reminder gave while you played; it asks the agent every few events and only speaks up when there is something worth saying ([docs/REMINDER.md](docs/REMINDER.md)) |
 | `/wow-ai shop [<number>\|clear]` | what your agent suggested buying; at the auction house a click types the item name into the search box, you press Search ([docs/SHOP.md](docs/SHOP.md)) |
 | `/wow-ai code [load <slot>\|stop <name\|all>\|on\|off]` | run addon code the agent offered and the bridge accepted; nothing runs until you load it (off by default, [docs/CODE.md](docs/CODE.md)) |
 | `/wow-ai feed [on\|off\|atlas\|hold <s>\|shows <n>]` | the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status) |
@@ -234,7 +234,7 @@ The keys you are most likely to touch. Every key, flag and environment variable 
 - [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md): Linux + Wine install, and how to check the screen capture
 - [docs/MAP.md](docs/MAP.md): map layers, the navigator and herb/ore nodes
 - [docs/EVENTS.md](docs/EVENTS.md): the event feed: what the addon reports, the files the agent reads, and how it is tested
-- [docs/COACH.md](docs/COACH.md): the coach: the bridge asks the agent every few events whether you forgot something, and the tip shows in your chat
+- [docs/REMINDER.md](docs/REMINDER.md): the reminder: the bridge asks the agent every few events whether you forgot something, and the tip shows in your chat
 - [docs/SHOP.md](docs/SHOP.md): shopping suggestions: the agent proposes items, the addon lists them at the auction house and types the name into the search box
 - [docs/CODE.md](docs/CODE.md): agent-written addon code: the allowlist checker, the slots, the runtime environment, and why you load every piece yourself
 - [docs/DISTANCE.md](docs/DISTANCE.md): the distance index: map sizes in yards, `maps.txt`, shortcuts in `data/transport.json`, and how it is tested

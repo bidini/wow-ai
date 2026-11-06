@@ -29,7 +29,7 @@ local SLOT_COUNT = 200
 local SLOT_PREFIX = "WoWAI_S"
 local ACT_MAX = 60 -- heartbeat files per message (act/NNN/01..60.wav)
 local PRESENCE_MAX = 2000 -- presence/0001..2000.wav, one flipped by the bridge every 30 s
-local COACH_MAX = 400 -- coach/0001..0400.wav, the next one is flipped by the bridge when a coach tip is waiting (docs/COACH.md)
+local REMINDER_MAX = 400 -- reminder/0001..0400.wav, the next one is flipped by the bridge when a reminder tip is waiting (docs/REMINDER.md)
 local STRIP_TRIES = 3 -- re-show an unacknowledged message this many times before falling back
 local CELL, CELLS_PER_ROW, MAX_ROWS = 4, 200, 48
 local STRIP_MARGIN_MAC = 96 -- UI units (about pixels) between the window's left edge and the strip on a Mac client
@@ -515,29 +515,29 @@ local function PollPresence()
 	end
 end
 
--- Coach tips: the bridge flips the next coach/NNNN.wav valid when a tip is waiting, the same trick as
+-- Reminder tips: the bridge flips the next reminder/NNNN.wav valid when a tip is waiting, the same trick as
 -- presence, so waiting for tips costs no slot reads. A hit means "read a slot now" (see Tick).
-local function CoachPath(k)
-	return string.format("Interface\\AddOns\\WoWAI\\coach\\%04d.wav", k)
+local function ReminderPath(k)
+	return string.format("Interface\\AddOns\\WoWAI\\reminder\\%04d.wav", k)
 end
 
-local function FindCoachHead()
-	local lo, hi = 0, COACH_MAX
+local function FindReminderHead()
+	local lo, hi = 0, REMINDER_MAX
 	while lo < hi do
 		local mid = math.ceil((lo + hi) / 2)
-		if SoundValid(CoachPath(mid)) then lo = mid else hi = mid - 1 end
+		if SoundValid(ReminderPath(mid)) then lo = mid else hi = mid - 1 end
 	end
 	return lo
 end
 
-local function PollCoach()
+local function PollReminder()
 	if not signalAvailable or not db.settings.signal then return false end
-	run.coach = run.coach or { last = FindCoachHead() }
+	run.reminder = run.reminder or { last = FindReminderHead() }
 	local hit = false
 	for _ = 1, 3 do
-		local k = (run.coach.last % COACH_MAX) + 1
-		if not SoundValid(CoachPath(k)) then break end
-		run.coach.last = k
+		local k = (run.reminder.last % REMINDER_MAX) + 1
+		if not SoundValid(ReminderPath(k)) then break end
+		run.reminder.last = k
 		hit = true
 	end
 	return hit
@@ -749,9 +749,9 @@ local function ApplyReplies(replies)
 	local matched = false
 	for _, r in ipairs(replies or {}) do
 		local c = FindChat(r.chat)
-		if r.coach then
+		if r.reminder then
 			-- A tip the bridge started on its own: no chat is waiting for it.
-			if WoWAICoach then WoWAICoach.Offer(r) end
+			if WoWAIReminder then WoWAIReminder.Offer(r) end
 		elseif c and c.pendingId and r.id == c.pendingId then
 			matched = true
 			MarkAcked(r.id)
@@ -855,7 +855,7 @@ local function Tick()
 	if not db then return end
 	local now = GetTime()
 	PollPresence()
-	if PollCoach() then run.coachDue = true end
+	if PollReminder() then run.reminderDue = true end
 	-- Without presence beats, the only evidence is a slot read; spend one every
 	-- IDLE_POLL_SECONDS while idle so the light still reflects reality (and stays
 	-- green while the bridge is up: BridgeState allows for this interval).
@@ -867,9 +867,9 @@ local function Tick()
 	WoWAI.UpdateDot()
 	WoWAI.CheckConnection()
 	if db.settings.mode ~= "pixel" then return end
-	if run.coachDue then
-		run.coachDue = nil
-		TryLoadSlot("coach")
+	if run.reminderDue then
+		run.reminderDue = nil
+		TryLoadSlot("reminder")
 	end
 	local changed = false
 	if run.helloPollAt and now >= run.helloPollAt then
@@ -2875,7 +2875,7 @@ local HELP = table.concat({
 	"/wow-ai agent [name]           which agent this chat talks to (no name = show; default = the bridge's). Right-clicking the chat and picking Agent does the same",
 	"/wow-ai reset                  next message in this chat starts a fresh agent session",
 	"/wow-ai context [on|off]       what the agent is told about your character and where you are (no argument = show it)",
-	"/wow-ai coach [clear]          the tips the coach gave while you played (the bridge asks the agent every few events; no argument = list)",
+	"/wow-ai reminder [clear]          the tips the reminder gave while you played (the bridge asks the agent every few events; no argument = list)",
 	"/wow-ai shop [<number>|clear]   what your agent suggested buying; at the auction house a click types the item name into the search box (no argument = list)",
 	"/wow-ai code [load <slot>|stop <name|all>|on|off]   run addon code the agent offered and the bridge accepted; nothing runs until you load it, and never at login (no argument = status)",
 	"/wow-ai feed [on|off|atlas|info|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
@@ -2923,7 +2923,7 @@ local COMMAND_ARGS = {
 	chat = ChatArgument, chats = ChatArgument,
 	cd = true, new = true, rename = true,
 	feed = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest == "atlas" or rest == "info" or rest:match("^hold %d+%.?%d*$") ~= nil or rest:match("^shows %d$") ~= nil end,
-	coach = function(rest) return rest == "" or rest == "clear" end, -- Coach.lua
+	reminder = function(rest) return rest == "" or rest == "clear" end, -- Reminder.lua
 	shop = function(rest) return rest == "" or rest == "clear" or rest:match("^%d+$") ~= nil end, -- Shop.lua
 	code = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest:match("^load %d+$") ~= nil or rest:match("^stop [%w%-_]+$") ~= nil end, -- Code.lua
 	map = true, -- /wow-ai map ...: Map.lua (layers, navigator, herb/ore nodes)
@@ -3004,8 +3004,8 @@ SlashCmdList["WOWAI"] = function(msg)
 		WoWAI.Toggle(true)
 	elseif cmd == "feed" then
 		if WoWAIFeed then WoWAIFeed.Command(rest) else print("|cff66ccff[WoW AI]|r the event feed module did not load") end
-	elseif cmd == "coach" then
-		if WoWAICoach then WoWAICoach.Command(rest) else print("|cff66ccff[WoW AI]|r the coach module did not load") end
+	elseif cmd == "reminder" then
+		if WoWAIReminder then WoWAIReminder.Command(rest) else print("|cff66ccff[WoW AI]|r the reminder module did not load") end
 	elseif cmd == "shop" then
 		if WoWAIShop then WoWAIShop.Command(rest) else print("|cff66ccff[WoW AI]|r the shopping module did not load") end
 	elseif cmd == "code" then

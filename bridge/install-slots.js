@@ -73,10 +73,10 @@ for (let k = 1; k <= PRESENCE; k++) {
   ensure(path.join(addons, 'WoWAI', 'presence', String(k).padStart(4, '0') + '.wav'), '');
 }
 
-// Coach files: the bridge flips the next one valid when a tip is waiting (docs/COACH.md).
-const COACH = cfg.coachMax || 400;
-for (let k = 1; k <= COACH; k++) {
-  ensure(path.join(addons, 'WoWAI', 'coach', String(k).padStart(4, '0') + '.wav'), '');
+// Reminder files: the bridge flips the next one valid when a tip is waiting (docs/REMINDER.md).
+const REMINDER = cfg.reminderMax || 400;
+for (let k = 1; k <= REMINDER; k++) {
+  ensure(path.join(addons, 'WoWAI', 'reminder', String(k).padStart(4, '0') + '.wav'), '');
 }
 
 // Control files for the addon's self-test: one always empty, one always valid.
