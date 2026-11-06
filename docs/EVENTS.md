@@ -23,7 +23,7 @@ The addon tells the bridge what happens in the game: quests accepted, ready and 
 | `taxi` | a flight ended (10 s or longer) | seconds, from map and position, to map and position (see [DISTANCE.md](DISTANCE.md)) |
 | `tick` | nothing else was sent for 5 minutes (a heartbeat) | none |
 
-Quests are found by comparing the quest log with the last look (1.5 s after `QUEST_LOG_UPDATE` settles), so the same code works whatever arguments the client gives its quest events. The whole log goes out with a change as a `Q` line.
+Quests are found by comparing the quest log with the last look (1.5 s after `QUEST_LOG_UPDATE` settles), so the same code works whatever arguments the client gives its quest events. The whole log goes out with a change as a `Q` line. The quest line carries each quest's name once per login (`id=name`); the bridge keeps the names (also from the accept and ready events, in `snapshot.json` under `quests.names`) and writes the summary as `Quest log: Name (id); …`. The agent is told to use the names when it writes to you and the numbers only to look things up.
 
 Position is sampled every 10 s, **only when it changed** (more than 0.04 % of the map), and sent about once a minute while moving, or with the next event. No position is available in instances; the snapshot then has map `0` and empty coordinates.
 
@@ -36,7 +36,7 @@ One strip record per batch, in the layout of [ARCHITECTURE.md](ARCHITECTURE.md):
 ```
 v	1                                                    payload version; then the character name and realm (v 1 <name> <realm>)
 S	t level map x10 y10 cur run zone subzone dead xp xpMax    state snapshot, in every batch
-Q	176	33*	54                                       whole quest log; * = ready to turn in
+Q	176=Wolves Across the Border	33*	54       whole quest log; * = ready to turn in; =name once per session
 E	t type args...                                       an event
 P	t map x10 y10                                        a position sample
 D	n                                                    n lines were dropped to fit

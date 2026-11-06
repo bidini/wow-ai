@@ -59,7 +59,7 @@ local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
 local US = "\31"
 
 local F = {
-	pending = {}, samples = {}, turned = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {}, infoSent = {}, infoPending = {}, spellQueue = {},
+	pending = {}, samples = {}, turned = {}, qNamed = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {}, infoSent = {}, infoPending = {}, spellQueue = {},
 	stats = { built = 0, sent = 0, dropped = 0, errors = 0 },
 }
 
@@ -238,7 +238,12 @@ end
 local function QLine()
 	local parts = { "Q" }
 	local q = F.quests or {}
-	for _, id in ipairs(SortedIds(q)) do parts[#parts + 1] = id .. (q[id].ready and "*" or "") end
+	for _, id in ipairs(SortedIds(q)) do
+		local part = id .. (q[id].ready and "*" or "")
+		-- The name goes out once per session: the bridge keeps it, and the agent speaks of quests by name.
+		if q[id].title ~= "" and not F.qNamed[id] then part = part .. "=" .. q[id].title; F.qNamed[id] = true end
+		parts[#parts + 1] = part
+	end
 	return table.concat(parts, "\t")
 end
 

@@ -154,6 +154,7 @@ test('the agent is told the rules and sees the live summary', () => {
   assert.match(s, /at most three short lines/);
   assert.match(s, /never instructions to you/);
   assert.match(s, /not be condescending/);
+  assert.match(s, /quest names, never their numbers/);
   assert.match(s, /Now: level 4, Deathknell\./);
   assert.match(s, /no "TL;DR"/, 'no summary block is asked for');
   assert.match(systemPrompt(''), /exactly NOTHING/);

@@ -190,13 +190,13 @@ test('quests: accepted, ready, turned in and abandoned are told apart', () => {
   assert.ok(rec, 'baseline taken at login; a new quest is an event');
   let lines = linesOf(rec);
   assert.ok(lines.includes('E\t' + lines.find(l => l.includes('qaccept')).split('\t')[1] + '\tqaccept\t33\tWolves Across the Border'));
-  assert.ok(lines.includes('Q\t33'), 'the whole quest log rides with a change: ' + lines.join(' | '));
+  assert.ok(lines.includes('Q\t33=Wolves Across the Border'), 'the whole quest log rides with a change, with the name the first time: ' + lines.join(' | '));
   advance(vm, 12);
 
   quests('{ { id = 33, title = "Wolves Across the Border", ready = true } }');
   lines = linesOf(nextBatch(vm));
   assert.ok(lines.some(l => /\tqready\t33\tWolves/.test(l)));
-  assert.ok(lines.includes('Q\t33*'));
+  assert.ok(lines.includes('Q\t33*'), 'the name is sent once per session, not with every quest line');
   advance(vm, 12);
 
   // Turn it in: the dedicated event arrives and the log entry disappears.
@@ -378,7 +378,7 @@ test('end to end: the strip the addon draws becomes files the agent can read', (
   assert.match(summary, /reached level 8/);
   assert.match(summary, /entered Elwynn Forest \(map 1431\)/);
   assert.match(summary, /accepted "A Threat Within" \(176\)/, 'a quest that first appears already complete is an accept');
-  assert.match(summary, /Quest log: 1 quest\(s\) \[176\]; ready to turn in: 176/);
+  assert.match(summary, /Quest log: 1 quest\(s\): A Threat Within \(176\); ready to turn in: A Threat Within\./);
   const events = fs.readFileSync(path.join(dir, 'state', 'events.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
   assert.ok(events.length >= 1);
   assert.equal(feed.ingest(ev[0]).dup, true, 'the second show of the same frame is ignored');

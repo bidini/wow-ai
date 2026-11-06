@@ -14,7 +14,7 @@ const T0 = 1700000000;
 const batch = (events, tag = '') => [
   'v\t1\tLeprince\tCamwow',
   `S\t${T0}\t4\t1420\t300\t709\t7.0\t7.0\tTirisfal Glades\tDeathknell${tag}\t0\t10\t100`,
-  'Q\t363*',
+  'Q\t363*=The Damned',
   ...events,
 ].join('\n');
 const THREE = [`E\t${T0}\tqdone\t376\tThe Damned`, `E\t${T0 + 1}\tsub\tBrill`, `E\t${T0 + 2}\tlevel\t5`];
@@ -85,7 +85,7 @@ test('three events start a check; the tip reaches the game files and the day log
   const system = call.args[call.args.indexOf('--append-system-prompt') + 1];
   assert.match(system, /automatic check, not a message from them/);
   assert.match(system, /Active character: Leprince of Camwow/, 'the live summary is in the system prompt');
-  assert.match(system, /Quest log: 1 quest\(s\)/);
+  assert.match(system, /Quest log: 1 quest\(s\): The Damned \(363\)/);
 
   const lua = inbox(S);
   assert.match(lua, /reminder = true,/);
