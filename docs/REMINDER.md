@@ -20,6 +20,8 @@ A check that fails (the agent is down, a timeout) is logged and changes nothing 
 
 ## In the game
 
+`/wow-ai reminder window <number|name|default>` chooses the chat tab the reminders are written to (no argument = show the current one and the tabs). Make a tab first: right-click a chat tab, New Window, name it (say "Reminders"). The name is kept, so it survives tabs being reordered; if the tab is closed the reminders go back to the main window. The list command writes to the same tab.
+
 `/wow-ai reminder` lists the last tips (up to 20, kept in the saved variables) with their age; `/wow-ai reminder clear` forgets them. A tip that was already shown, or that is older than 15 minutes when the addon reads it, is not shown again.
 
 ## Settings (`reminder` in `bridge/config.json`)

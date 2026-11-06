@@ -126,6 +126,71 @@ test('the tips survive in the saved variables, at most twenty', () => {
   assert.equal(vm.evaluate('WoWAIDB.reminderTips[20].text'), 'tip 25');
 });
 
+// Two chat tabs: 1 "General" (what print() writes to) and 2 "Reminders", which collects what AddMessage gets.
+function twoTabs(vm) {
+  vm.load(`
+    NUM_CHAT_WINDOWS = 3
+    STUB.tab2 = {}
+    ChatFrame1 = { AddMessage = function(self, m) table.insert(STUB.prints, m) end }
+    ChatFrame2 = { AddMessage = function(self, m) table.insert(STUB.tab2, m) end }
+    ChatFrame3 = { AddMessage = function(self, m) end }
+    local names = { "General", "Reminders", "" }
+    function GetChatWindowInfo(i) return names[i] end
+  `);
+}
+const tab2 = vm => { vm.load('RESULT_T = table.concat(STUB.tab2, "\\n")'); return vm.evaluate('RESULT_T') || ''; };
+
+test('/wow-ai reminder window <name> sends the tips to that chat tab, not the main one', () => {
+  const vm = newVM();
+  twoTabs(vm);
+  vm.cmd('reminder window reminders');                       // any case
+  assert.match(vm.prints(), /reminders now go to the chat window "Reminders"/);
+  vm.load('STUB.prints = {}');
+  assert.equal(vm.evaluate(`WoWAIReminder.Offer(${luaTip(vm, { id: 1, text: 'Hand in the quests.\nFour wait in Brill.' })})`), 'true');
+  assert.equal(tipLines(vm).length, 0, 'nothing in the main window');
+  const out = tab2(vm);
+  assert.match(out, /WoW AI reminder\]\|r Hand in the quests\./);
+  assert.match(out, /Four wait in Brill\./);
+});
+
+test('the window can be given as a number, shown, and reset to the main window', () => {
+  const vm = newVM();
+  twoTabs(vm);
+  vm.cmd('reminder window 2');
+  assert.equal(vm.evaluate('WoWAIDB.reminderWindow'), 'Reminders', 'kept by name, tab numbers can shift');
+  vm.load('STUB.prints = {}');
+  vm.cmd('reminder window');
+  assert.match(vm.prints(), /reminders go to "Reminders"/);
+  assert.match(vm.prints(), /1 General/);
+  vm.cmd('reminder window default');
+  assert.equal(vm.evaluate('WoWAIDB.reminderWindow'), null);
+  vm.load('STUB.prints = {}');
+  vm.load(`WoWAIReminder.Offer(${luaTip(vm, { id: 5, text: 'Back in the main window.' })})`);
+  assert.equal(tipLines(vm).length, 1);
+});
+
+test('an unknown window changes nothing, and a tab that went away falls back to the main window', () => {
+  const vm = newVM();
+  twoTabs(vm);
+  vm.cmd('reminder window Nope');
+  assert.match(vm.prints(), /no chat window called "Nope"/);
+  assert.equal(vm.evaluate('WoWAIDB.reminderWindow'), null);
+  vm.cmd('reminder window Reminders');
+  vm.load('NUM_CHAT_WINDOWS = 1; STUB.prints = {}');         // the tab was closed
+  vm.load(`WoWAIReminder.Offer(${luaTip(vm, { id: 6, text: 'Still heard.' })})`);
+  assert.equal(tipLines(vm).length, 1);
+});
+
+test('/wow-ai reminder lists the tips in the chosen window too', () => {
+  const vm = newVM();
+  twoTabs(vm);
+  vm.cmd('reminder window Reminders');
+  vm.load(`WoWAIReminder.Offer(${luaTip(vm, { id: 1, text: 'One.' })})`);
+  vm.load('STUB.tab2 = {}');
+  vm.cmd('reminder');
+  assert.match(tab2(vm), /1 tip\(s\), newest last/);
+});
+
 test('the reminder module only reads and prints: it calls nothing that acts', () => {
   const src = fs.readFileSync(path.join(ADDON, 'Reminder.lua'), 'utf8').replace(/--[^\n]*/g, '');
   for (const banned of ['SendChatMessage', 'RunScript', 'CastSpellByName', 'UseAction', 'TargetUnit', 'QueryAuctionItems', 'PlaceAuctionBid', 'BuyMerchantItem', 'ChatEdit_SendText', ':Click(', 'SecureCmdOptionParse', 'loadstring']) {

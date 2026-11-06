@@ -10,13 +10,34 @@ WoWAIReminder = M
 local KEPT = 20
 local STALE_SECONDS = 900 -- a tip still sitting in the slot data from long ago is not news
 
-local function Say(msg) print("|cffffd100[WoW AI reminder]|r " .. msg) end
-
 local function Saved()
 	if type(WoWAIDB) ~= "table" then return nil end
 	WoWAIDB.reminderTips = WoWAIDB.reminderTips or {}
 	return WoWAIDB
 end
+
+-- The chat tab number for a name (any case) or a number, nil when there is no such tab.
+local function WindowIndex(w)
+	local max = NUM_CHAT_WINDOWS or 1
+	local n = tonumber(w)
+	if n then return (n >= 1 and n <= max and n == math.floor(n)) and n or nil end
+	if type(w) ~= "string" or w == "" or not GetChatWindowInfo then return nil end
+	for i = 1, max do
+		local name = GetChatWindowInfo(i)
+		if type(name) == "string" and name:lower() == w:lower() then return i end
+	end
+	return nil
+end
+
+-- Where the reminders are written: the chosen chat tab, else the main window (what print() uses).
+local function Out(text)
+	local db = Saved()
+	local i = db and db.reminderWindow ~= nil and WindowIndex(db.reminderWindow)
+	local frame = i and _G["ChatFrame" .. i]
+	if frame and frame.AddMessage then frame:AddMessage(text) else print(text) end
+end
+
+local function Say(msg) Out("|cffffd100[WoW AI reminder]|r " .. msg) end
 
 -- A tip is new when it is later than the last one shown (the bridge's clock, then its own id), so a
 -- restarted bridge that numbers from 1 again is still heard, and a tip is never shown twice.
@@ -51,9 +72,42 @@ local function Age(at)
 	return string.format("%.1f h", s / 3600)
 end
 
+-- The chat tabs, "1 General, 2 Reminders", for the window command.
+local function Windows()
+	local list = {}
+	for i = 1, NUM_CHAT_WINDOWS or 1 do
+		local name = GetChatWindowInfo and GetChatWindowInfo(i)
+		if type(name) == "string" and name ~= "" then table.insert(list, i .. " " .. name) end
+	end
+	return table.concat(list, ", ")
+end
+
+local function WindowCommand(db, arg)
+	if arg == "default" then
+		db.reminderWindow = nil
+		print("|cffffd100[WoW AI reminder]|r reminders go to the main chat window")
+	elseif arg == "" then
+		local i = db.reminderWindow ~= nil and WindowIndex(db.reminderWindow)
+		print("|cffffd100[WoW AI reminder]|r " .. (i and ("reminders go to \"" .. tostring(GetChatWindowInfo and GetChatWindowInfo(i) or i) .. "\"") or "reminders go to the main chat window")
+			.. ". Tabs: " .. Windows() .. ". Change with /wow-ai reminder window <number|name|default>")
+	else
+		local i = WindowIndex(arg)
+		if not i then
+			print("|cffffd100[WoW AI reminder]|r no chat window called \"" .. arg .. "\". Tabs: " .. Windows() .. ". Make one by right-clicking a chat tab and choosing New Window")
+			return
+		end
+		local name = GetChatWindowInfo and GetChatWindowInfo(i)
+		db.reminderWindow = (type(name) == "string" and name ~= "") and name or i
+		Out("|cffffd100[WoW AI reminder]|r reminders now go to the chat window \"" .. tostring(name or i) .. "\"")
+		if i ~= 1 then print("|cffffd100[WoW AI reminder]|r reminders now go to the chat window \"" .. tostring(name or i) .. "\"") end
+	end
+end
+
 function M.Command(rest)
 	local db = Saved()
 	if not db then return end
+	local window = rest:match("^window%s*(.-)%s*$")
+	if window then WindowCommand(db, window) return end
 	if rest == "clear" then
 		db.reminderTips = {}
 		Say("cleared")
@@ -68,7 +122,7 @@ function M.Command(rest)
 	for _, t in ipairs(tips) do
 		local first = true
 		for line in t.text:gmatch("[^\n]+") do
-			print((first and ("  |cff999999" .. Age(t.at) .. " ago|r  ") or "      ") .. line)
+			Out((first and ("  |cff999999" .. Age(t.at) .. " ago|r  ") or "      ") .. line)
 			first = false
 		end
 	end

@@ -2875,7 +2875,7 @@ local HELP = table.concat({
 	"/wow-ai agent [name]           which agent this chat talks to (no name = show; default = the bridge's). Right-clicking the chat and picking Agent does the same",
 	"/wow-ai reset                  next message in this chat starts a fresh agent session",
 	"/wow-ai context [on|off]       what the agent is told about your character and where you are (no argument = show it)",
-	"/wow-ai reminder [clear]          the tips the reminder gave while you played (the bridge asks the agent every few events; no argument = list)",
+	"/wow-ai reminder [clear|window <number|name|default>]   the tips the reminder gave while you played (the bridge asks the agent every few events; window = the chat tab they are written to; no argument = list)",
 	"/wow-ai shop [<number>|clear]   what your agent suggested buying; at the auction house a click types the item name into the search box (no argument = list)",
 	"/wow-ai code [load <slot>|stop <name|all>|on|off]   run addon code the agent offered and the bridge accepted; nothing runs until you load it, and never at login (no argument = status)",
 	"/wow-ai feed [on|off|atlas|info|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
@@ -2923,7 +2923,7 @@ local COMMAND_ARGS = {
 	chat = ChatArgument, chats = ChatArgument,
 	cd = true, new = true, rename = true,
 	feed = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest == "atlas" or rest == "info" or rest:match("^hold %d+%.?%d*$") ~= nil or rest:match("^shows %d$") ~= nil end,
-	reminder = function(rest) return rest == "" or rest == "clear" end, -- Reminder.lua
+	reminder = function(rest) return rest == "" or rest == "clear" or rest:match("^window") ~= nil end, -- Reminder.lua
 	shop = function(rest) return rest == "" or rest == "clear" or rest:match("^%d+$") ~= nil end, -- Shop.lua
 	code = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest:match("^load %d+$") ~= nil or rest:match("^stop [%w%-_]+$") ~= nil end, -- Code.lua
 	map = true, -- /wow-ai map ...: Map.lua (layers, navigator, herb/ore nodes)
