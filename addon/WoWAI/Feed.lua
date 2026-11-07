@@ -44,7 +44,7 @@ local QUEST_DELAY = 1.5
 local MOVE_EPS = 0.0004    -- map fraction; smaller moves are not new samples
 local ATLAS_PER_BATCH = 8   -- maps described per batch
 local ATLAS_BYTES = 760     -- atlas lines only fill what the other head lines leave under this
-local ATLAS_QUEUE = 120
+local ATLAS_QUEUE = 400
 local ATLAS_SCALE = 10000
 local INFO_FIRST = 1         -- read the character this long after entering the world
 local INFO_DEBOUNCE = 3      -- wait this long after gear, skills or spells change
@@ -61,6 +61,7 @@ local MAX_SKILLS = 24
 local TAXI_MIN = 10        -- a flight shorter than this is not reported
 local TAXI_LAND_WAIT = 5   -- wait this long for a position after landing
 local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
+local CONTINENT = (Enum and Enum.UIMapType and Enum.UIMapType.Continent) or 2
 local US = "\31"
 
 local F = {
@@ -263,7 +264,7 @@ local function AtlasAdd(mapID, cont)
 	F.atlasQueue[#F.atlasQueue + 1] = { map = mapID, cont = cont }
 end
 
--- Queue the current map and every zone map of its continent that has not been sent this session.
+-- Queue the current map and every zone map of its continent, then of the other continents, that has not been sent this session.
 local function QueueAtlas()
 	local m = Try(C_Map and C_Map.GetBestMapForUnit, "player")
 	local Map = WoWAIMap
@@ -275,6 +276,21 @@ local function QueueAtlas()
 	if type(kids) == "table" then
 		for _, info in ipairs(kids) do
 			if type(info) == "table" then AtlasAdd(info.mapID, cont) end
+		end
+	end
+	-- The other continents of the world too (the client can describe any map from anywhere), so the bridge can place quests in zones
+	-- the player has not been to.
+	local info = Try(C_Map.GetMapInfo, cont)
+	local world = type(info) == "table" and info.parentMapID or nil
+	if type(world) == "number" and world > 0 then
+		local conts = Try(C_Map.GetMapChildrenInfo, world, CONTINENT)
+		for _, c in ipairs(type(conts) == "table" and conts or {}) do
+			if type(c) == "table" and type(c.mapID) == "number" and c.mapID ~= cont then
+				local zones = Try(C_Map.GetMapChildrenInfo, c.mapID, ZONE, true)
+				for _, z in ipairs(type(zones) == "table" and zones or {}) do
+					if type(z) == "table" then AtlasAdd(z.mapID, c.mapID) end
+				end
+			end
 		end
 	end
 	if #F.atlasQueue > 0 then

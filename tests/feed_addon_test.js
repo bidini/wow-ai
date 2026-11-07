@@ -1091,3 +1091,25 @@ test('flight points: the faction is sent; the client\'s isUndiscovered flag is n
   assert.deepEqual(fp.nodes.map(n => [n.id, n.state, n.faction]), [[10, 9, 1], [6, 9, 2], [19, 9, 0], [99, 9, 9]],
     'no state without a flight master window; faction 0 neutral / 1 Horde / 2 Alliance / 9 unknown');
 });
+
+test('atlas: the other continents of the world are sent too, so quests there can be placed before you go', () => {
+  const vm = newVM();
+  vm.run(ATLAS_STUB(3));
+  vm.run(`
+    local M = STUB.atlasMaps
+    M[100].parent = 1
+    M[1] = { type = 1, name = "Azeroth", parent = 0 }
+    M[200] = { type = 2, name = "Kalimdor", parent = 1 }
+    M[3000] = { type = 3, name = "The Barrens", parent = 200, rect = { 0.40, 0.50, 0.50, 0.60 } }
+    M[3001] = { type = 3, name = "Ashenvale", parent = 200, rect = { 0.30, 0.38, 0.30, 0.40 } }
+    Enum.UIMapType.World = 1`);
+  login(vm); connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  const lines = atlasOf(collect(vm, 90));
+  assert.deepEqual(lines.filter(l => l.startsWith('K\t')).sort(), ['K\t100\t40000\t30000', 'K\t200\t40000\t30000'], 'both continents, once each');
+  const ws = lines.filter(l => l.startsWith('W\t'));
+  assert.ok(ws.includes('W\t3000\t200\t4000\t5000\t5000\t6000\tThe Barrens'), ws.join(' | '));
+  assert.ok(ws.some(l => l.startsWith('W\t3001\t200\t')));
+  assert.ok(ws.includes('W\t1431\t100\t3000\t3500\t7000\t7500\tDuskwood'), 'the continent you are on is still sent');
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
