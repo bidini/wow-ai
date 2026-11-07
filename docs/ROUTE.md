@@ -42,3 +42,7 @@ Twelve lines at most, starting from the step before the current one. Drag the fr
 ## Installing a route
 
 `node plan.mjs 22 350` (or `./run.sh`) writes `out/RouteData.lua` next to the route report; `INSTALL=1` also copies it into the game folder. `/reload` in game reads it. A new route (a new `stamp` in the file) forgets the hand-made ticks of the old one. `setup.js` never overwrites `RouteData.lua` once it exists. Adding `Route.lua` and `RouteData.lua` to the addon needs one full relaunch of the game; after that a `/reload` is enough.
+
+## On the world map
+
+The current step and the next ones (up to 14 with a position) are drawn on the world map as numbered diamonds joined by a thin line: violet for quest steps (accept, kill, collect, turn in), cyan for travel (flight, zeppelin, flight point, inn). The current step is larger. They are square and numbered, unlike the round game icons and the round pins the agent's layers use. Steps at one place share a marker; hover shows the steps there. Steps with no position (using the hearthstone) are left out. `/wow-ai route map off` hides them, `on` shows them.

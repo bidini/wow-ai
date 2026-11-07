@@ -52,6 +52,21 @@ local function StepDone(s)
 end
 
 -- { current = first step not done (past the end when all are), done = { [i] = true } }
+-- The steps to draw on the world map: from the current step on, the ones with a position (Map.lua draws them).
+function M.MapSteps(limit)
+	if DB().mapOff or not data or type(data.steps) ~= "table" or DB().off then return {} end
+	local cur = M.State().current
+	local out = {}
+	for i = cur, #data.steps do
+		local s = data.steps[i]
+		if type(s.m) == "number" and type(s.x) == "number" and type(s.y) == "number" then
+			out[#out + 1] = { i = i, k = s.k, t = s.t, m = s.m, x = s.x, y = s.y, current = (i == cur), travel = TRAVEL[s.k] == true }
+		end
+		if #out >= (limit or 14) then break end
+	end
+	return out
+end
+
 function M.State()
 	local state = { current = 1, done = {} }
 	local steps = data and data.steps or {}
@@ -149,6 +164,7 @@ function M.Refresh()
 		local row, line = list.rows[r], lines[r]
 		if line then SetRow(row, line.text, line.step) else row.text, row.step = nil, nil; row:Hide() end
 	end
+	if WoWAIMap and WoWAIMap.Refresh then WoWAIMap.Refresh() end -- the route markers on the world map follow the current step
 end
 
 -- Reads the route again (after the planner wrote a new RouteData.lua and the game was reloaded, or on login); a new route forgets the
@@ -255,6 +271,10 @@ function M.Command(msg)
 		if rest == "off" then db.arrowOff = true elseif rest == "on" then db.arrowOff = nil else Say("/wow-ai route arrow on|off") return end
 		M.UpdateArrow()
 		Say("arrow " .. rest)
+	elseif cmd == "map" then
+		if rest == "off" then db.mapOff = true elseif rest == "on" then db.mapOff = nil else Say("/wow-ai route map on|off") return end
+		if WoWAIMap and WoWAIMap.Refresh then WoWAIMap.Refresh() end
+		Say("route markers on the world map " .. rest)
 	elseif cmd == "reset" then db.skips = {}; M.Refresh(); Say("hand-made ticks cleared")
 	elseif cmd == "skip" or cmd == "undo" then
 		local n = tonumber(rest) or (cmd == "skip" and M.State().current) or nil
