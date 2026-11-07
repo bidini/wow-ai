@@ -449,7 +449,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
     writeAtomic('summary.txt', summary(rx) + '\n');
     log(`feed #${job.id}: ${p.snapshot ? 'snapshot, ' : ''}${p.events.length} event(s), ${p.samples.length} position(s)` +
       `${gap ? `, ${gap} batch(es) missed before it` : ''}${p.unknown ? `, ${p.unknown} unreadable line(s)` : ''}`);
-    return { dup: false, events: p.events.length, types: p.events.map(e => e.type), samples: p.samples.length, gap };
+    return { dup: false, events: p.events.length, types: p.events.map(e => e.type), evs: p.events.map(e => ({ type: e.type, args: e.args })), here: mem.snapshot ? { map: mem.snapshot.map, x: mem.snapshot.x, y: mem.snapshot.y } : null, samples: p.samples.length, gap };
   }
 
   // The picture of the game right now, short enough to ride in every system prompt.

@@ -22,7 +22,7 @@ const TWO = [`E\t${T0}\tqdone\t376\tThe Damned`, `E\t${T0 + 1}\tsub\tBrill`];
 const THREE = [...TWO, `E\t${T0 + 2}\tlevel\t5`];
 
 const ROUTE = 'Here is your route, enjoy!\n```wowmap\n{"op":"set","layer":"anything","title":"ignored","points":[' +
-  '{"m":1420,"x":61.5,"y":52.2,"label":"Turn in: The Damned (Brill)","kind":"turnin"},' +
+  '{"m":1420,"x":61.5,"y":52.2,"label":"Turn in: The Damned (Brill)","kind":"turnin","q":900},' +
   '{"m":1420,"x":60,"y":50,"label":"Train: Paladin spells (Brill)","kind":"trainer"},' +
   '{"m":1420,"x":40.1,"y":55.3,"label":"Kill: Scarlet Initiates","kind":"kill"}]}\n```';
 
@@ -32,7 +32,7 @@ let stdin = '';
 process.stdin.on('data', d => stdin += d);
 process.stdin.on('end', () => {
   fs.appendFileSync(path.join(process.cwd(), 'calls.jsonl'), JSON.stringify({ args: process.argv.slice(2), stdin }) + '\\n');
-  const file = /^\\[route update\\]/.test(stdin) ? 'route-reply.txt' : 'reply.txt';
+  const file = /^\\[route (update|build)\\]/.test(stdin) ? 'route-reply.txt' : 'reply.txt';
   let text = file === 'reply.txt' ? 'NOTHING' : 'no route';
   try { text = fs.readFileSync(path.join(process.cwd(), file), 'utf8'); } catch {}
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'fake-session' }));
@@ -54,7 +54,7 @@ function sandbox(routerCfg) {
   cfg.slots = 3;
   cfg.agents.claude.path = path.join(S, 'fake-claude');
   cfg.reminder = { minSeconds: 0 };
-  cfg.router = routerCfg === undefined ? { minSeconds: 0 } : routerCfg;
+  cfg.router = routerCfg === undefined ? { minSeconds: 0, minStops: 2 } : routerCfg;
   fs.writeFileSync(path.join(S, 'config.json'), JSON.stringify(cfg, null, 2));
   const r = spawnSync(process.execPath, ['install-slots.js'], { cwd: S, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
@@ -70,7 +70,7 @@ function inject(S, text, id) {
   return r.stdout;
 }
 const calls = S => { try { return fs.readFileSync(path.join(S, 'proj', 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse); } catch { return []; } };
-const routeCalls = S => calls(S).filter(c => /^\[route update\]/.test(c.stdin));
+const routeCalls = S => calls(S).filter(c => /^\[route (update|build)\]/.test(c.stdin));
 const routeReply = (S, text) => fs.writeFileSync(path.join(S, 'proj', 'route-reply.txt'), text);
 const inbox = S => { try { return fs.readFileSync(path.join(S, 'addons', 'WoWAI', 'Inbox.lua'), 'utf8'); } catch { return ''; } };
 const state = S => JSON.parse(fs.readFileSync(path.join(S, 'state.json'), 'utf8'));
@@ -80,18 +80,19 @@ const dayDir = S => {
   return path.join(root, fs.readdirSync(root)[0]);
 };
 
-test('one batch of events starts an update; the route becomes a quiet layer and nothing is said', () => {
+test('the first update builds the whole route; it becomes a quiet layer and nothing is said', () => {
   const S = sandbox();
   routeReply(S, ROUTE);
   const out = inject(S, batch(TWO), 5);
-  assert.match(out, /route #1: 2 new event\(s\), asking the agent/);
+  assert.match(out, /route #1: 2 new event\(s\), asking the agent \(build\)/);
   assert.match(out, /route #1: 3 stop\(s\)/);
 
   const [call] = routeCalls(S);
   assert.equal(routeCalls(S).length, 1);
-  assert.match(call.stdin, /^\[route update\] 2 new game events/);
+  assert.match(call.stdin, /^\[route build\] 2 new game events/);
   const system = call.args[call.args.indexOf('--append-system-prompt') + 1];
   assert.match(system, /automatic route update/);
+  assert.match(system, /COMPLETE route/, 'a build asks for the whole route');
   assert.match(system, /Quest log: 1 quest\(s\): The Damned \(363\)/, 'the live summary is in the system prompt');
 
   const layer = state(S).map.layers.route;
@@ -100,6 +101,9 @@ test('one batch of events starts an update; the route becomes a quiet layer and 
   assert.equal(layer.quiet, true);
   assert.equal(layer.points[0].label, 'Turn in: The Damned (Brill)');
   assert.equal(layer.points[1].kind, 'trainer');
+  assert.equal(layer.points[0].q, 900);
+  assert.deepEqual(layer.points.map(p => p.id), ['s1', 's2', 's3'], 'the bridge numbers the stops');
+  assert.doesNotMatch(inbox(S), /s1/, 'the ids stay on the bridge');
 
   const lua = inbox(S);
   assert.match(lua, /name = "route"/);
@@ -111,6 +115,7 @@ test('one batch of events starts an update; the route becomes a quiet layer and 
   assert.equal(entry.id, 1);
   assert.equal(entry.events, 2);
   assert.equal(entry.stops, 3);
+  assert.equal(entry.mode, 'build');
   assert.deepEqual(Object.keys(state(S).sessions || {}).filter(k => /route/.test(k)), [], 'an update leaves no session behind');
 });
 
@@ -121,19 +126,58 @@ test('a route that did not change changes nothing in the game', () => {
   const version = state(S).map.version;
   const sig = state(S).reminderSig;
   const out = inject(S, batch(TWO.map(l => l.replace('Brill', 'Sepulcher')), '2'), 6);
+  assert.match(out, /route #2: .*\(revise\)/);
   assert.match(out, /route #2: route unchanged/);
   assert.equal(state(S).map.version, version);
   assert.equal(state(S).reminderSig, sig, 'no new signal');
 });
 
-test('a reply without a route keeps the old one', () => {
+test('a reply without a route keeps the old one; a build that gets none says so', () => {
   const S = sandbox();
   routeReply(S, ROUTE);
   inject(S, batch(TWO), 5);
-  routeReply(S, 'I could not work out a route.');
+  routeReply(S, 'NOTHING');
   const out = inject(S, batch(TWO.map(l => l.replace('Brill', 'Sepulcher')), '2'), 6);
-  assert.match(out, /route #2: no route in the reply, keeping the old one/);
+  assert.match(out, /route #2: no change/);
   assert.equal(state(S).map.layers.route.points.length, 3);
+  const T = sandbox();
+  routeReply(T, 'I could not work out a route.');
+  assert.match(inject(T, batch(TWO), 5), /route #1: no route in the reply, keeping the old one/);
+  assert.equal(state(T).map.layers.route, undefined);
+});
+
+test('a revision is a patch: stops go and come by id, and the game is told', () => {
+  const S = sandbox();
+  routeReply(S, ROUTE);
+  inject(S, batch(TWO), 5);
+  const sig = state(S).reminderSig;
+  routeReply(S, '```wowmap\n{"op":"patch","remove":["s1"],"add":[{"after":"s3","m":1420,"x":55,"y":44,"label":"Buy: Linen Bandage (Apothecary Johaan, Brill)","kind":"vendor"}]}\n```');
+  const out = inject(S, batch(TWO.map(l => l.replace('Brill', 'Sepulcher')), '2'), 6);
+  assert.match(out, /route #2: 3 stop\(s\)/);
+  const pts = state(S).map.layers.route.points;
+  assert.deepEqual(pts.map(p => p.label), ['Train: Paladin spells (Brill)', 'Kill: Scarlet Initiates', 'Buy: Linen Bandage (Apothecary Johaan, Brill)']);
+  assert.deepEqual(pts.map(p => p.id), ['s2', 's3', 's4']);
+  assert.equal(state(S).reminderSig, sig + 1);
+  const second = routeCalls(S)[1];
+  assert.match(second.stdin, /^\[route update\] 2 new game events/);
+  assert.match(second.stdin, /\[s1\] Turn in: The Damned \(Brill\) \| map 1420 61\.5, 52\.2 \| quest 900\n\[s2\]/);
+  const system = second.args[second.args.indexOf('--append-system-prompt') + 1];
+  assert.match(system, /"op":"patch"/);
+  assert.doesNotMatch(system, /COMPLETE route/, 'a revision does not rebuild');
+});
+
+test('finished stops are removed at once, without waiting for the agent', () => {
+  const S = sandbox();
+  routeReply(S, ROUTE.replace('"kind":"turnin","q":900', '"kind":"turnin","q":376'));
+  inject(S, batch(TWO), 5);
+  assert.equal(state(S).map.layers.route.points.length, 3);
+  routeReply(S, 'NOTHING');
+  const out = inject(S, batch([`E\t${T0 + 5}\tqdone\t376\tThe Damned`]), 6);
+  assert.match(out, /route: 1 finished stop\(s\) removed, 2 left/);
+  assert.deepEqual(state(S).map.layers.route.points.map(p => p.id), ['s2', 's3']);
+  assert.doesNotMatch(routeCalls(S)[1].stdin, /The Damned/, 'the revision never sees the finished stop');
+  assert.match(inbox(S), /Train: Paladin spells/);
+  assert.doesNotMatch(inbox(S), /Turn in: The Damned/);
 });
 
 test('the next update is told the stops of the current route', () => {
@@ -142,7 +186,7 @@ test('the next update is told the stops of the current route', () => {
   inject(S, batch(TWO), 5);
   inject(S, batch(TWO.map(l => l.replace('Brill', 'Sepulcher')), '2'), 6);
   const second = routeCalls(S)[1];
-  assert.match(second.stdin, /Current route[^\n]*\n1\. Turn in: The Damned \(Brill\)\n2\. Train: Paladin spells \(Brill\)\n3\. Kill: Scarlet Initiates/);
+  assert.match(second.stdin, /Current route[^\n]*\n\[s1\] Turn in: The Damned \(Brill\)[^\n]*\n\[s2\] Train: Paladin spells \(Brill\)[^\n]*\n\[s3\] Kill: Scarlet Initiates/);
 });
 
 test('three events start both a route update and a reminder check, each with its own question', () => {

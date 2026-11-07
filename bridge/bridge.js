@@ -488,6 +488,7 @@ function submit(job) {
       if (!r.dup) {
         saveState();
         if (reminder && reminder.note(r.key, r.types)) maybeReminder();
+        if (router) pruneRoute(r);
         if (router && router.note(r.key, r.types)) maybeRoute();
       }
     } catch (e) { log(`feed: could not store #${job.id}: ${e.message}`); }
@@ -603,7 +604,7 @@ function runJob(job) {
 
   const ctx = gameContext();
   const liveFeed = feed ? feed.block() : '';
-  const own = job.router ? Router.systemPrompt(liveFeed) : job.reminder ? Reminder.systemPrompt(liveFeed) : '';
+  const own = job.router ? Router.systemPrompt(liveFeed, job.routerRun.mode) : job.reminder ? Reminder.systemPrompt(liveFeed) : '';
   const system = own || P.systemPrompt(ctx, primer(), liveFeed, CODE_HINT);
   const systemShort = own || P.systemPrompt(ctx, '', liveFeed, CODE_HINT);
   const promptFile = path.join(TMP_DIR, `prompt-${job.id}-${Date.now().toString(36)}.txt`);
@@ -848,15 +849,43 @@ function finishReminder(job, status, text) {
 // The router
 // ---------------------------------------------------------------------------
 
-const routeStops = () => ((state.map.layers[Router.ROUTE_LAYER] || {}).points || []).map(p => p.label);
+const routeLayer = () => state.map.layers[Router.ROUTE_LAYER];
+const routePoints = () => (routeLayer() || {}).points || [];
+// What decides whether a route changed: the stops, not the ids the bridge numbered them with.
+const stopKey = p => [p.m, p.x, p.y, p.label, p.kind, p.q || 0].join('|');
+const sameStops = (a, b) => a.length === b.length && a.every((p, i) => stopKey(p) === stopKey(b[i]));
 
-// Starts an update when enough events have come in and nothing blocks it; same cadence rules as maybeReminder.
+// Makes `points` the route (no points: no route), and tells the game with a record that holds no text; the
+// reminder signal makes the game look. Returns the stops now on the map.
+function setRoute(points) {
+  const valid = points.length ? P.validateMapCommand({ op: 'set', layer: Router.ROUTE_LAYER, title: 'Route', ordered: true, quiet: true, points }) : null;
+  P.applyMapCommands(state.map, [valid || { op: 'clear', layer: Router.ROUTE_LAYER }]);
+  state.router.published = (state.router.published || 0) + 1;
+  saveState();
+  mapShareUntil = Date.now() + MAP_SHARE_MS;
+  publish('route:update', { chat: 'route', id: state.router.published, status: 'done', text: '', route: true, at: Date.now(), cwd: '', session: '', agent: '' }, true);
+  reminderBeat();
+  saveState();
+  return valid ? valid.points : [];
+}
+
+// Stops the batch finished (a quest handed in, a trainer reached) leave the route at once.
+function pruneRoute(r) {
+  const plan = routePoints();
+  if (!plan.length) return;
+  const { points, removed } = Router.prune(plan, r.evs, r.here);
+  if (!removed) return;
+  const now = setRoute(points);
+  log(`route: ${removed} finished stop(s) removed, ${now.length} left`);
+}
+
+// Starts an update when events have come in and nothing blocks it; same cadence rules as maybeReminder.
 function maybeRoute() {
   if (!router || router.blocked() || running.size >= MAX_PARALLEL) return;
-  const run = router.begin(Date.now(), routeStops());
+  const run = router.begin(Date.now(), routePoints());
   if (!run) return;
-  log(`route #${run.id}: ${run.events} new event(s), asking the agent`);
-  runJob({ id: ROUTER_JOB_BASE + run.id, chat: 'route', session: 'route', text: run.prompt, cwd: '', newSession: true, via: 'route', router: true, routerRun: run, timeoutMs: router.config.timeoutMs, agent: '' });
+  log(`route #${run.id}: ${run.events} new event(s), asking the agent (${run.mode})`);
+  runJob({ id: ROUTER_JOB_BASE + run.id, chat: 'route', session: 'route', text: run.prompt, cwd: '', newSession: true, via: 'route', router: true, routerRun: run, timeoutMs: run.mode === 'build' ? router.config.buildTimeoutMs : router.config.timeoutMs, agent: '' });
 }
 
 function finishRoute(job, status, text) {
@@ -865,25 +894,19 @@ function finishRoute(job, status, text) {
   router.end();
   const at = Date.now();
   if (status === 'done') {
-    const cmd = Router.routeCommand(text);
-    const valid = cmd && P.validateMapCommand(cmd);
+    const plan = routePoints();
+    const update = Router.routeUpdate(text);
+    const next = update ? router.apply(plan, update) : null;
+    const valid = next && next.length ? P.validateMapCommand({ op: 'set', layer: Router.ROUTE_LAYER, title: 'Route', ordered: true, quiet: true, points: next }) : null;
     if (!valid) {
-      log(`route #${run.id}: no route in the reply, keeping the old one`);
+      log(`route #${run.id}: ${run.mode === 'build' ? 'no route in the reply, keeping the old one' : 'no change'}`);
     } else {
-      const before = JSON.stringify((state.map.layers[Router.ROUTE_LAYER] || {}).points || []);
-      if (feed) feed.logLine(run.key, 'route.jsonl', at, { t: at, id: run.id, events: run.events, stops: valid.points.length, route: valid.points.map(p => p.label) });
-      if (JSON.stringify(valid.points) === before) {
+      if (feed) feed.logLine(run.key, 'route.jsonl', at, { t: at, id: run.id, mode: run.mode, events: run.events, stops: valid.points.length, route: valid.points.map(p => p.label) });
+      if (sameStops(valid.points, plan)) {
         log(`route #${run.id}: route unchanged`);
       } else {
-        P.applyMapCommands(state.map, [valid]);
-        saveState();
-        mapShareUntil = Date.now() + MAP_SHARE_MS;
-        // No text for the player: a record with nothing in it carries the new map to the game, and the
-        // reminder signal tells the game to look.
-        publish('route:update', { chat: 'route', id: run.id, status: 'done', text: '', route: true, at, cwd: '', session: '', agent: '' }, true);
-        reminderBeat();
-        saveState();
-        log(`route #${run.id}: ${valid.points.length} stop(s): ${valid.points.slice(0, 3).map(p => p.label).join(' > ').slice(0, 160)}`);
+        const now = setRoute(valid.points);
+        log(`route #${run.id}: ${now.length} stop(s): ${now.slice(0, 3).map(p => p.label).join(' > ').slice(0, 160)}`);
       }
     }
   } else {

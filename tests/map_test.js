@@ -86,6 +86,15 @@ test('slot files carry the map as a Lua table the addon can read', () => {
   assert.ok(!P.luaTable('X', [], { now: 1 }).includes('map ='));
 });
 
+test('stops keep an id and a quest number for the bridge, and bad ones are dropped', () => {
+  const c = P.validateMapCommand({ op: 'set', layer: 'route', points: [pt(1, 1, { id: 's12', q: 440 }), pt(2, 2, { id: 'bad id!', q: -3 }), pt(3, 3, { q: 'x' })] });
+  assert.deepEqual([c.points[0].id, c.points[0].q], ['s12', 440]);
+  assert.equal(c.points[1].id, undefined);
+  assert.equal(c.points[1].q, undefined);
+  assert.equal(c.points[2].q, undefined);
+  assert.doesNotMatch(P.luaMap({ epoch: 'e', version: 1, layers: { route: { title: 'R', points: c.points } } }), /s12/, 'the game does not need them');
+});
+
 test('a quiet layer keeps its flag through validation, the map and the Lua the game reads', () => {
   const c = P.validateMapCommand({ op: 'set', layer: 'route', quiet: true, points: [pt(1, 1)] });
   assert.equal(c.quiet, true);

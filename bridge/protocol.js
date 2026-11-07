@@ -413,10 +413,14 @@ function validateMapCommand(c, why = []) {
   for (const p of c.points.slice(0, MAP_LIMITS.pointsPerLayer)) {
     const m = Number(p && p.m), x = Number(p && p.x), y = Number(p && p.y);
     if (!Number.isInteger(m) || m <= 0 || m > 99999 || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-    points.push({
+    const point = {
       m, x: Math.round(Math.min(100, Math.max(0, x)) * 100) / 100, y: Math.round(Math.min(100, Math.max(0, y)) * 100) / 100,
       label: cleanText(p.label, MAP_LIMITS.label), kind: MAP_KINDS.has(p.kind) ? p.kind : 'poi',
-    });
+    };
+    // Stops of the router's route also carry an id and the quest they belong to (the game does not need them).
+    if (typeof p.id === 'string' && /^[A-Za-z0-9]{1,8}$/.test(p.id)) point.id = p.id;
+    if (Number.isInteger(p.q) && p.q > 0 && p.q <= 9999999) point.q = p.q;
+    points.push(point);
   }
   if (c.points.length > MAP_LIMITS.pointsPerLayer) why.push(`layer ${layer}: kept the first ${MAP_LIMITS.pointsPerLayer} points`);
   if (points.length < c.points.slice(0, MAP_LIMITS.pointsPerLayer).length) why.push(`layer ${layer}: dropped invalid points`);
