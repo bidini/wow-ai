@@ -941,7 +941,7 @@ function flightPoints(batches) {
   for (const c of chunks.sort((a, b) => Number(a[2]) - Number(b[2]))) {
     for (const tok of c.slice(5)) {
       const m = /^(\d+):(\d):(\d+):(\d+):(\d+):(.*)$/.exec(tok);
-      nodes.push({ id: +m[1], known: m[2] === '1', map: +m[3], x: +m[4] / 10, y: +m[5] / 10, name: m[6] });
+      nodes.push({ id: +m[1], state: +m[2], map: +m[3], x: +m[4] / 10, y: +m[5] / 10, name: m[6] });
     }
   }
   return { src: chunks[0][4], nodes };
@@ -951,11 +951,11 @@ test('flight points: the nodes the client lists for the continent go out with th
   const vm = flightVM();
   const fp = flightPoints(collect(vm, 70));
   assert.equal(fp.src, 'forMap');
-  assert.deepEqual(fp.nodes.map(n => [n.id, n.known, n.map, n.x, n.y, n.name]), [
-    [11, true, 1415, 42.6, 21.8, 'The Sepulcher, Silverpine Forest'],
-    [12, true, 1415, 47.1, 34.4, 'Tarren Mill, Hillsbrad Foothills'],
-    [13, true, 1415, 44.7, 25.6, 'Undercity, Tirisfal'],
-  ], 'every node the call lists is a known one');
+  assert.deepEqual(fp.nodes.map(n => [n.id, n.state, n.map, n.x, n.y, n.name]), [
+    [11, 1, 1415, 42.6, 21.8, 'The Sepulcher, Silverpine Forest'],
+    [12, 2, 1415, 47.1, 34.4, 'Tarren Mill, Hillsbrad Foothills'],
+    [13, 0, 1415, 44.7, 25.6, 'Undercity, Tirisfal'],
+  ], 'each node goes out with the state the client gives it (0 here now, 1 reachable, 2 unreachable, 9 none)');
   assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
 });
 
@@ -976,11 +976,11 @@ test('flight points: a client without the call says so, with no nodes and no err
   assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
 });
 
-test('flight points: when only GetAllTaxiNodes exists, unreachable nodes are not counted as known', () => {
-  const vm = flightVM('local f = C_TaxiMap.GetTaxiNodesForMap; C_TaxiMap = { GetAllTaxiNodes = f }');
+test('flight points: GetAllTaxiNodes is used when it is the only call, and a node with no state says so', () => {
+  const vm = flightVM('local f = C_TaxiMap.GetTaxiNodesForMap; C_TaxiMap = { GetAllTaxiNodes = f }; STUB.taxi[2].state = nil');
   const fp = flightPoints(collect(vm, 70));
   assert.equal(fp.src, 'all');
-  assert.deepEqual(fp.nodes.map(n => [n.id, n.known]), [[11, true], [12, false], [13, true]]);
+  assert.deepEqual(fp.nodes.map(n => [n.id, n.state]), [[11, 1], [12, 9], [13, 0]]);
 });
 
 test('hearthstone: the bind place, when it is ready again, and that you carry one', () => {

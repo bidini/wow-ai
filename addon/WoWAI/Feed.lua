@@ -471,9 +471,11 @@ local function ContinentMap(mapID)
 	end
 end
 
--- The flight points of the continent the player is on: { src, nodes = { { id, k (1 = known), m, x, y, name } } }.
+-- The flight points of the continent the player is on: { src, nodes = { { id, s (state), m, x, y, name } } }; s is 0 current,
+-- 1 reachable, 2 unreachable, 9 when the client gives none. Reachable and current nodes are the ones the player has discovered and can fly
+-- to from the flight master they stand at.
 -- src says which call answered ("forMap", "all") or "none" when the client has neither; nil when the continent is not known.
--- GetTaxiNodesForMap lists the nodes the player has discovered; GetAllTaxiNodes also lists the others, told apart by state.
+-- The nodes of both factions are listed, discovered or not, and told apart by state.
 local function ReadFlightPoints()
 	local TM = C_TaxiMap
 	local src, get
@@ -489,9 +491,8 @@ local function ReadFlightPoints()
 		for _, n in ipairs(list) do
 			local p = type(n) == "table" and n.position
 			if type(n.nodeID) == "number" and type(p) == "table" and type(p.x) == "number" and type(p.y) == "number" and #nodes < MAX_FLIGHT then
-				local known = true
-				if src == "all" then known = n.state == 0 or n.state == 1 end -- Enum.FlightPathState: Current, Reachable
-				nodes[#nodes + 1] = { id = n.nodeID, k = known and 1 or 0, m = cont, x = Tenths(p.x), y = Tenths(p.y), name = Clean(n.name, 40) }
+				local s = (n.state == 0 or n.state == 1 or n.state == 2) and n.state or 9
+				nodes[#nodes + 1] = { id = n.nodeID, s = s, m = cont, x = Tenths(p.x), y = Tenths(p.y), name = Clean(n.name, 40) }
 			end
 		end
 	end
@@ -573,7 +574,7 @@ local function CheckInfo()
 	local fp = ReadFlightPoints()
 	if fp then
 		local toks = {}
-		for _, n in ipairs(fp.nodes) do toks[#toks + 1] = n.id .. ":" .. n.k .. ":" .. n.m .. ":" .. n.x .. ":" .. n.y .. ":" .. n.name end
+		for _, n in ipairs(fp.nodes) do toks[#toks + 1] = n.id .. ":" .. n.s .. ":" .. n.m .. ":" .. n.x .. ":" .. n.y .. ":" .. n.name end
 		local sig = fp.src .. "|" .. table.concat(toks, "\t")
 		if sent.T ~= sig then
 			sent.T = sig
