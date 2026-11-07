@@ -783,3 +783,120 @@ test('professions: learning one (a new skill line) is sent as a changed R line',
   assert.equal(r.length, 1);
   assert.match(r[0], /Fishing=1\/75$/);
 });
+
+// ---------------------------------------------------------------------------
+// A client with only the modern spellbook (C_SpellBook), and the completed quests
+// ---------------------------------------------------------------------------
+
+const MODERN_STUB = `
+STUB.gear = {}
+function GetInventoryItemID(unit, slot) return STUB.gear[slot] end
+STUB.book = { { "Holy Light", "Rank 2" }, { "Holy Light", "Rank 1" }, { "Seal of Righteousness", "Rank 1" }, { "Redemption", "" }, { "Hidden Future Spell", "", 2 } }
+Enum = Enum or {}
+Enum.SpellBookSpellBank = { Player = 0 }
+Enum.SpellBookItemType = { None = 0, Spell = 1, FutureSpell = 2, PetAction = 3, Flyout = 4 }
+C_SpellBook = {
+  GetNumSpellBookSkillLines = function() return 1 end,
+  GetSpellBookSkillLineInfo = function(i) return { name = "General", itemIndexOffset = 0, numSpellBookItems = #STUB.book } end,
+  GetSpellBookItemInfo = function(i, bank) local s = STUB.book[i]; if s then return { itemType = s[3] or 1, spellID = 1000 + i } end end,
+  GetSpellBookItemName = function(i, bank) local s = STUB.book[i]; if s then return s[1], s[2] end end,
+}
+`;
+function modernVM() {
+  const vm = newVM();
+  vm.run(MODERN_STUB);
+  login(vm); connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  return vm;
+}
+
+test('spells: a client that only has C_SpellBook reports the spellbook, without future spells', () => {
+  const vm = modernVM();
+  const a = linesStarting(collect(vm, 70), 'A');
+  assert.equal(a.length, 1);
+  assert.match(a[0], /^A\t\d+\t1\t1\tHoly Light=2\tSeal of Righteousness=1\tRedemption$/, 'highest rank once, a spell with no rank by name, future spells left out');
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('spells: a new spell on the modern client is sent again under a newer number', () => {
+  const vm = modernVM();
+  const first = linesStarting(collect(vm, 70), 'A');
+  vm.run('table.insert(STUB.book, 1, { "Devotion Aura", "Rank 1" }); STUB.FireEvent("SPELLS_CHANGED")');
+  const second = linesStarting(collect(vm, 30), 'A');
+  assert.equal(second.length, 1);
+  assert.ok(Number(second[0].split('\t')[1]) > Number(first[0].split('\t')[1]));
+  assert.match(second[0], /Devotion Aura=1/);
+});
+
+const DONE_STUB = `
+STUB.doneIds = { 357, 405, 421, 91209, 96627, 96628, 96898, 96899, 97951, 358, 374 }
+C_QuestLog = C_QuestLog or {}
+C_QuestLog.GetAllCompletedQuestIDs = function() local t = {}; for i, v in ipairs(STUB.doneIds) do t[i] = v end; return t end
+`;
+// What the bridge makes of the Z lines: the ids, in order.
+function doneIds(batches) {
+  const chunks = linesStarting(batches, 'Z').map(l => l.split('\t'));
+  if (!chunks.length) return null;
+  assert.equal(new Set(chunks.map(c => c[1])).size, 1, 'one set number');
+  const n = Number(chunks[0][3]);
+  assert.equal(chunks.length, n, 'every chunk of the set arrived');
+  const ids = [];
+  for (const c of chunks.sort((a, b) => Number(a[2]) - Number(b[2]))) {
+    let last = Number(c[2]) === 1 ? 0 : null;
+    for (const tok of c.slice(4)) {
+      const [abs, d] = tok.startsWith('=') ? [true, parseInt(tok.slice(1), 36)] : [false, parseInt(tok, 36)];
+      last = abs ? d : last + d;
+      ids.push(last);
+    }
+  }
+  return ids;
+}
+function doneVM() {
+  const vm = newVM();
+  vm.run(DONE_STUB);
+  login(vm); connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  return vm;
+}
+
+test('completed quests: the whole list goes out once, sorted and delta-coded, and survives a round trip', () => {
+  const vm = doneVM();
+  const batches = collect(vm, 70);
+  const ids = doneIds(batches);
+  assert.deepEqual(ids, [357, 358, 374, 405, 421, 91209, 96627, 96628, 96898, 96899, 97951]);
+  assert.deepEqual(doneIds(collect(vm, 40)), null, 'nothing is sent again while nothing changes');
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('completed quests: handing in a quest sends the list again under a newer number', () => {
+  const vm = doneVM();
+  const first = linesStarting(collect(vm, 70), 'Z');
+  vm.run('table.insert(STUB.doneIds, 440); STUB.FireEvent("QUEST_TURNED_IN", 440, 100, 50)');
+  const batches = collect(vm, 40);
+  const second = linesStarting(batches, 'Z');
+  assert.ok(Number(second[0].split('\t')[1]) > Number(first[0].split('\t')[1]));
+  assert.ok(doneIds(batches).includes(440));
+});
+
+test('completed quests: a long list goes out in chunks, two to a batch, each batch inside the size cap', () => {
+  const vm = newVM();
+  vm.run(DONE_STUB);
+  vm.run('STUB.doneIds = {}; for i = 1, 700 do STUB.doneIds[i] = i * 7 + (i % 3) end');
+  login(vm); connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  const batches = collect(vm, 300);
+  const ids = doneIds(batches);
+  assert.equal(ids.length, 700);
+  assert.deepEqual(ids, Array.from({ length: 700 }, (_, i) => (i + 1) * 7 + ((i + 1) % 3)).sort((a, b) => a - b));
+  for (const b of batches) {
+    assert.ok(b.text.length <= 1250, `batch of ${b.text.length}`);
+    assert.ok(linesOf(b).filter(l => l.startsWith('Z\t')).length <= 2);
+  }
+});
+
+test('completed quests: a client without the call sends no Z lines and raises no error', () => {
+  const vm = ready({ settle: false });
+  const batches = collect(vm, 70);
+  assert.deepEqual(linesStarting(batches, 'Z'), []);
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});

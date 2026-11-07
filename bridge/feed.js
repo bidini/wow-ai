@@ -110,6 +110,24 @@ function parsePayload(text) {
         (out.hero.spellChunks = out.hero.spellChunks || []).push({ gen, i, n, spells });
         break;
       }
+      case 'Z': {
+        // Z gen i n =first step step ...: chunk i of n of the quests handed in, sorted; the first number is absolute
+        // (base 36, after "="), the others are steps from the one before.
+        const gen = int(f[1]), i = int(f[2]), n = int(f[3]);
+        if (gen === null || i === null || n === null || n < 1 || n > MAX_DONE_CHUNKS || i < 1 || i > n || !/^=[0-9a-z]{1,6}$/.test(f[4] || '')) { out.unknown++; break; }
+        const ids = [];
+        let last = 0;
+        for (const tok of f.slice(4, 4 + 200)) {
+          const m = /^(=?)([0-9a-z]{1,6})$/.exec(tok);
+          if (!m || (!m[1] && ids.length === 0)) { out.unknown++; break; }
+          const v = parseInt(m[2], 36);
+          last = m[1] ? v : last + v;
+          if (last > 0 && last <= 9999999) ids.push(last);
+        }
+        out.hero = out.hero || {};
+        (out.hero.doneChunks = out.hero.doneChunks || []).push({ gen, i, n, ids });
+        break;
+      }
       case 'K': case 'W': {
         // Atlas lines (docs/DISTANCE.md). The key exists only when a batch carries some.
         const a = parseAtlasLine(f, clean);
@@ -180,6 +198,7 @@ const DONE_KEPT = 60;         // quest titles kept per day
 const DONE_SHOWN = 12;        // listed in day.txt
 const MAX_SKILLS = 40;
 const MAX_CHUNKS = 60;        // spell chunks in one set
+const MAX_DONE_CHUNKS = 120;  // completed-quest chunks in one set
 const STATE_EVERY_MS = 5 * 60000; // the daily state record, besides when gear, skills or spells change
 
 // 123456 copper is "12g 34s 56c", the way the game shows it.
@@ -210,7 +229,7 @@ function dayText(d) {
 
 function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), maxFileBytes = 2000000, transportFile = '', dailyLog = true, atlas: sharedAtlas = null }) {
   const atlas = sharedAtlas || createAtlas({ dir, transportFile, clean, log });
-  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, professions: [], skills: [], skillsSeen: false, spells: [], spellsGen: 0 }, spellAsm: null, quests: { active: [], ready: [], names: {} }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
+  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, professions: [], skills: [], skillsSeen: false, spells: [], spellsGen: 0, completed: [], completedGen: 0 }, spellAsm: null, doneAsm: null, quests: { active: [], ready: [], names: {} }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
 
   const file = name => path.join(dir, name);
   function ensureDir() { fs.mkdirSync(dir, { recursive: true, mode: 0o755 }); }
@@ -276,6 +295,20 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
         for (let i = 1; i <= asm.n; i++) all.push(...asm.parts[i]);
         all.sort((a, b) => a.name.localeCompare(b.name));
         c.spells = all; c.spellsGen = asm.gen; mem.spellAsm = null; ch.spells = true;
+      }
+    }
+    if (!Array.isArray(c.completed)) { c.completed = []; c.completedGen = 0; }
+    for (const chunk of h.doneChunks || []) {
+      if (chunk.gen < (c.completedGen || 0)) continue;             // an older set arriving late
+      let asm = mem.doneAsm;
+      if (asm && chunk.gen < asm.gen) continue;
+      if (!asm || chunk.gen > asm.gen) asm = mem.doneAsm = { gen: chunk.gen, n: chunk.n, parts: {} };
+      if (chunk.n !== asm.n) continue;
+      asm.parts[chunk.i] = chunk.ids;
+      if (Object.keys(asm.parts).length === asm.n) {
+        const all = [];
+        for (let i = 1; i <= asm.n; i++) all.push(...asm.parts[i]);
+        c.completed = [...new Set(all)].sort((a, b) => a - b); c.completedGen = asm.gen; mem.doneAsm = null; ch.completed = true;
       }
     }
     return ch;
@@ -473,6 +506,7 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       if (ch.gold !== null && ch.gold !== undefined) bits.push(goldText(ch.gold));
       bits.push(`${Object.keys(ch.equipped || {}).length} items equipped`);
       if ((ch.spells || []).length) bits.push(`${ch.spells.length} spells`);
+      if ((ch.completed || []).length) bits.push(`${ch.completed.length} quests completed`);
       if (ch.skillsSeen) {
         const profs = ch.professions || [];
         const show = list => list.map(k => `${k.name} ${k.rank}/${k.max}`).join(', ');

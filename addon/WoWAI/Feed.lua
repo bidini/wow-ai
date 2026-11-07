@@ -50,6 +50,8 @@ local INFO_FIRST = 1         -- read the character this long after entering the 
 local INFO_DEBOUNCE = 3      -- wait this long after gear, skills or spells change
 local INFO_HEAD_BYTES = 900 -- character lines only fill what the other head lines leave under this
 local SPELLS_PER_CHUNK = 12
+local DONE_PER_CHUNK = 80     -- completed quest numbers per Z line (sorted, each as the step from the one before, in base 36)
+local MAX_DONE = 4000
 local CHUNKS_PER_BATCH = 2
 local MAX_SPELLS = 360
 local MAX_SKILLS = 24
@@ -59,7 +61,7 @@ local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
 local US = "\31"
 
 local F = {
-	pending = {}, samples = {}, turned = {}, qNamed = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {}, infoSent = {}, infoPending = {}, spellQueue = {},
+	pending = {}, samples = {}, turned = {}, qNamed = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {}, infoSent = {}, infoPending = {}, spellQueue = {}, doneQueue = {},
 	stats = { built = 0, sent = 0, dropped = 0, errors = 0 },
 }
 
@@ -370,12 +372,35 @@ local function ReadSkills()
 	return table.concat(parts, "\t")
 end
 
--- The spellbook as "name=rank" entries, the highest rank of each spell once. nil if this client
--- has no spellbook functions.
-local function ReadSpells()
+-- The spellbook as { name, subName } entries: through C_SpellBook where the client has it (the Forever
+-- client does not have the old global functions), else the old ones. nil if the client has neither.
+local function SpellBookModern()
+	local SB = C_SpellBook
+	if type(SB) ~= "table" or type(SB.GetNumSpellBookSkillLines) ~= "function" or type(SB.GetSpellBookSkillLineInfo) ~= "function" then return nil end
+	local lines = Try(SB.GetNumSpellBookSkillLines)
+	if type(lines) ~= "number" then return nil end
+	local bank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
+	local isSpell = (Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.Spell) or 1
+	local list = {}
+	for t = 1, lines do
+		local info = Try(SB.GetSpellBookSkillLineInfo, t)
+		if type(info) == "table" and type(info.itemIndexOffset) == "number" and type(info.numSpellBookItems) == "number" then
+			for i = info.itemIndexOffset + 1, info.itemIndexOffset + info.numSpellBookItems do
+				local item = Try(SB.GetSpellBookItemInfo, i, bank)
+				if type(item) == "table" and item.itemType == isSpell then
+					local name, sub = Try(SB.GetSpellBookItemName, i, bank)
+					list[#list + 1] = { name, sub }
+				end
+			end
+		end
+	end
+	return list
+end
+
+local function SpellBookLegacy()
 	local tabs = Try(GetNumSpellTabs)
 	if type(tabs) ~= "number" or (type(GetSpellBookItemName) ~= "function" and type(GetSpellName) ~= "function") then return nil end
-	local best, order = {}, {}
+	local list = {}
 	for t = 1, tabs do
 		local _, _, offset, count = Try(GetSpellTabInfo, t)
 		if type(offset) == "number" and type(count) == "number" then
@@ -384,19 +409,59 @@ local function ReadSpells()
 				if kind ~= "FUTURESPELL" and kind ~= "FLYOUT" then
 					local name, sub = Try(GetSpellBookItemName, i, "spell")
 					if type(name) ~= "string" then name, sub = Try(GetSpellName, i, "spell") end
-					if type(name) == "string" and name ~= "" and #order < MAX_SPELLS then
-						name = (Clean(name, 40):gsub("[=\t]", " "))
-						local rank = tonumber(tostring(sub or ""):match("(%d+)")) or 0
-						if best[name] == nil then order[#order + 1] = name; best[name] = rank
-						elseif rank > best[name] then best[name] = rank end
-					end
+					list[#list + 1] = { name, sub }
 				end
 			end
+		end
+	end
+	return list
+end
+
+-- The spellbook as "name=rank" entries, the highest rank of each spell once. nil if this client
+-- has no spellbook functions.
+local function ReadSpells()
+	local raw = SpellBookModern()
+	if not raw or #raw == 0 then raw = SpellBookLegacy() or raw end
+	if not raw then return nil end
+	local best, order = {}, {}
+	for _, e in ipairs(raw) do
+		local name, sub = e[1], e[2]
+		if type(name) == "string" and name ~= "" and #order < MAX_SPELLS then
+			name = (Clean(name, 40):gsub("[=\t]", " "))
+			local rank = tonumber(tostring(sub or ""):match("(%d+)")) or 0
+			if best[name] == nil then order[#order + 1] = name; best[name] = rank
+			elseif rank > best[name] then best[name] = rank end
 		end
 	end
 	local out = {}
 	for _, name in ipairs(order) do out[#out + 1] = best[name] > 0 and (name .. "=" .. best[name]) or name end
 	return out
+end
+
+-- The quests the character has handed in, as sorted numbers; nil if this client cannot say.
+local function ReadCompleted()
+	local ids
+	local all = C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs
+	if type(all) == "function" then ids = Try(all) end
+	if type(ids) ~= "table" and type(GetQuestsCompleted) == "function" then
+		local set = Try(GetQuestsCompleted)
+		if type(set) == "table" then ids = {}; for id in pairs(set) do ids[#ids + 1] = id end end
+	end
+	if type(ids) ~= "table" then return nil end
+	local out = {}
+	for _, id in pairs(ids) do
+		if type(id) == "number" and id > 0 and id == math.floor(id) and #out < MAX_DONE then out[#out + 1] = id end
+	end
+	table.sort(out)
+	return out
+end
+
+local DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
+local function Base36(n)
+	if n == 0 then return "0" end
+	local s = ""
+	while n > 0 do local d = n % 36; s = DIGITS:sub(d + 1, d + 1) .. s; n = (n - d) / 36 end
+	return s
 end
 
 local function ArmFlush()
@@ -425,7 +490,25 @@ local function CheckInfo()
 			end
 		end
 	end
-	if next(F.infoPending) or #F.spellQueue > 0 then ArmFlush() end
+	local done = ReadCompleted()
+	if done then
+		local sig = #done .. ":" .. table.concat(done, ",")
+		if sent.Z ~= sig then
+			sent.Z = sig
+			F.doneGen = math.max(Now(), (F.doneGen or 0) + 1)
+			F.doneQueue = {}
+			local n = math.max(1, math.ceil(#done / DONE_PER_CHUNK))
+			for i = 1, n do
+				local part, last = {}, nil
+				for k = (i - 1) * DONE_PER_CHUNK + 1, math.min(i * DONE_PER_CHUNK, #done) do
+					part[#part + 1] = last and Base36(done[k] - last) or ("=" .. Base36(done[k]))
+					last = done[k]
+				end
+				F.doneQueue[#F.doneQueue + 1] = "Z\t" .. F.doneGen .. "\t" .. i .. "\t" .. n .. "\t" .. table.concat(part, "\t")
+			end
+		end
+	end
+	if next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 then ArmFlush() end
 end
 
 ---------------------------------------------------------------------------
@@ -498,8 +581,11 @@ local function Build()
 		for _ = 1, CHUNKS_PER_BATCH do
 			if #F.spellQueue > 0 and Take(F.spellQueue[1]) then table.remove(F.spellQueue, 1) end
 		end
+		for _ = 1, CHUNKS_PER_BATCH do
+			if #F.doneQueue > 0 and Take(F.doneQueue[1]) then table.remove(F.doneQueue, 1) end
+		end
 		for _, l in ipairs(DrainAtlas(headSize)) do head[#head + 1] = l end
-		if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 then ArmFlush() end
+		if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 then ArmFlush() end
 	end
 	local ev, sm = F.pending, F.samples
 	local function size()
@@ -528,7 +614,7 @@ local function Build()
 	local wire = table.concat({ Wire(db.session), "", tostring(db.feedSeq), "", "e", "", payload }, US)
 	F.out = { seq = db.feedSeq, wire = wire, shows = 0, nextAt = now, createdAt = now, bytes = #payload }
 	F.pending, F.samples, F.flushAt = {}, {}, nil
-	if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 then F.flushAt = now + DEBOUNCE end
+	if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 then F.flushAt = now + DEBOUNCE end
 	F.lastBuild = now
 	F.stats.built = F.stats.built + 1
 end
@@ -576,7 +662,7 @@ function M.Tick()
 	if not F.out then
 		if now - (F.lastBuild or now) >= HEARTBEAT and #F.pending == 0 then Event("tick") end
 		local due = (F.flushAt and now >= F.flushAt) or #F.samples >= FLUSH_SAMPLES
-		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0) then Build() end
+		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0) then Build() end
 	end
 	o = F.out
 	if o and not o.showing and o.shows < Shows() and now >= o.nextAt and WoWAI.IsConnected() then
@@ -637,6 +723,7 @@ function M.OnEvent(event, a1, a2)
 	elseif event == "QUEST_TURNED_IN" then
 		if type(a1) == "number" then
 			F.turned[a1] = GetTime()
+			F.infoAt = F.infoAt or (GetTime() + INFO_DEBOUNCE)   -- the list of completed quests changed
 			Event("qdone", a1, F.quests and F.quests[a1] and F.quests[a1].title or "")
 			F.qline = true
 			if not F.questCheckAt then F.questCheckAt = GetTime() + QUEST_DELAY end
@@ -668,7 +755,7 @@ function M.Status()
 		enabled = Enabled(), built = F.stats.built, sent = F.stats.sent, dropped = F.stats.dropped, errors = F.stats.errors,
 		pending = #F.pending, samples = #F.samples, seq = WoWAIDB and WoWAIDB.feedSeq or 0, lastError = F.lastError,
 		hold = Hold(), shows = Shows(), showing = F.out ~= nil and F.out.showing or false, waiting = F.out ~= nil,
-		atlasQueued = #F.atlasQueue, infoQueued = #F.spellQueue + (next(F.infoPending) and 1 or 0),
+		atlasQueued = #F.atlasQueue, infoQueued = #F.spellQueue + #F.doneQueue + (next(F.infoPending) and 1 or 0),
 	}
 end
 
