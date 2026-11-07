@@ -52,7 +52,7 @@ local INFO_HEAD_BYTES = 900 -- character lines only fill what the other head lin
 local SPELLS_PER_CHUNK = 12
 local DONE_PER_CHUNK = 80     -- completed quest numbers per Z line (sorted, each as the step from the one before, in base 36)
 local MAX_DONE = 4000
-local FLIGHT_PER_CHUNK = 8    -- flight points per T line
+local FLIGHT_PER_CHUNK = 6    -- flight points per T line
 local MAX_FLIGHT = 120
 local HEARTHSTONE = 6948
 local CHUNKS_PER_BATCH = 2
@@ -506,9 +506,9 @@ local function TaxiNote(list)
 	if type(list) == "table" and type(list[1]) == "table" then for k in pairs(list[1]) do fields[#fields + 1] = tostring(k) end end
 	table.sort(fields)
 	for _, name in ipairs({ "NumTaxiNodes", "TaxiNodeGetType", "TaxiNodeName", "TaxiNodePosition" }) do if type(_G[name]) == "function" then api[#api + 1] = name end end
-	if type(C_TaxiMap) == "table" then for k, v in pairs(C_TaxiMap) do if type(v) == "function" then api[#api + 1] = "C_TaxiMap." .. k end end end
+	if type(C_TaxiMap) == "table" then for k, v in pairs(C_TaxiMap) do if type(v) == "function" then api[#api + 1] = "CT." .. k end end end
 	table.sort(api)
-	return "fields=" .. table.concat(fields, "+") .. ";api=" .. table.concat(api, ",")
+	return ("fields=" .. table.concat(fields, "+") .. ";api=" .. table.concat(api, ",")):sub(1, 100)   -- short: it rides on a line that must fit a batch
 end
 
 local function ReadFlightPoints()

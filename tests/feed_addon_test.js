@@ -1045,5 +1045,18 @@ test('flight points: with the old flight master calls, the node types become sta
 test('flight points: the first line says which fields and calls this client has, so a missing state can be seen', () => {
   const vm = flightVM();
   const line = linesStarting(collect(vm, 70), 'T')[0].split('\t')[4];
-  assert.match(line, /^forMap~fields=[^;]*nodeID[^;]*;api=.*C_TaxiMap\.GetTaxiNodesForMap/);
+  assert.match(line, /^forMap~fields=[^;]*nodeID[^;]*;api=.*CT\.GetTaxiNodesForMap/);
+});
+
+test('flight points: a client with many taxi calls and long node names still gets its list through, inside the batch cap', () => {
+  const vm = flightVM(`
+    STUB.taxi = {}
+    for i = 1, 36 do STUB.taxi[i] = { nodeID = i, name = "A Very Long Flight Point Name Number " .. i .. ", Some Zone", position = { x = 0.3 + i / 1000, y = 0.4 }, state = 9, extraFieldNumber1 = 1, extraFieldNumber2 = 2, extraFieldNumber3 = 3, extraFieldNumber4 = 4 } end
+    for _, name in ipairs({ "GetTaxiNodeInfoForSomethingLong", "GetAllTaxiNodePathsForThisMap", "GetTaxiMapIDForNode", "GetFlightPathDiscoveryState", "GetTaxiNodeConnectionsList", "IsTaxiNodeDiscovered", "GetNumTaxiNodes", "GetTaxiNodeCost" }) do C_TaxiMap[name] = function() return {} end end`);
+  const batches = collect(vm, 200);
+  const fp = flightPoints(batches);
+  assert.ok(fp, 'the flight points were sent');
+  assert.equal(fp.nodes.length, 36);
+  assert.ok(fp.note.length <= 110, `the note is short (${fp.note.length})`);
+  for (const b of batches) assert.ok(b.text.length <= 1250, `batch of ${b.text.length}`);
 });
