@@ -305,17 +305,18 @@ test('flight points are kept as a set, replaced by a newer one, and the hearthst
 test('a distant flight point is listed but not known; known points the bridge stored before this rule are forgotten', () => {
   const p = F.parsePayload(zPayload(tLine(3, 1, 1, 'forMap', [{ id: 19, s: 3, m: 1415, x: 440, y: 935, name: 'Booty Bay' }, { id: 10, s: 1, m: 1415, x: 411, y: 298, name: 'Sepulcher' }])));
   assert.deepEqual(p.hero.flightChunks[0].nodes.map(n => [n.id, n.state, n.known]), [[19, 3, false], [10, 1, true]]);
-  const q = F.parsePayload(zPayload(tLine(3, 1, 1, 'forMap', [{ id: 10, s: 4, f: 1, m: 1415, x: 411, y: 298, name: 'Sepulcher' }, { id: 13, s: 5, f: 1, m: 1415, x: 479, y: 318, name: 'Tarren Mill' }])));
-  assert.deepEqual(q.hero.flightChunks[0].nodes.map(n => [n.id, n.state, n.faction, n.known]), [[10, 4, 1, true], [13, 5, 1, false]], 'discovered is known, undiscovered is not');
+  const q = F.parsePayload(zPayload(tLine(3, 1, 1, 'forMap', [{ id: 10, s: 1, f: 1, m: 1415, x: 411, y: 298, name: 'Sepulcher' }, { id: 6, s: 9, f: 2, m: 1415, x: 487, y: 524, name: 'Ironforge' }])));
+  assert.deepEqual(q.hero.flightChunks[0].nodes.map(n => [n.id, n.state, n.faction, n.known]), [[10, 1, 1, true], [6, 9, 2, false]], 'only a current or reachable node is found');
+  assert.equal(F.parsePayload(zPayload('T\t1\t1\t1\tforMap\t7:4:1:1415:1:1:x')).hero.flightChunks[0].nodes.length, 0, 'the old discovered / undiscovered states are gone');
   const t = setup();
   t.feed.ingest(job(zPayload('H\tUndead\tPaladin\tHorde', tLine(3, 1, 1, 'forMap', [{ id: 10, s: 1, m: 1415, x: 411, y: 298, name: 'Sepulcher' }])), 1));
   const file = path.join(t.state, 'snapshot.json');
   const snap = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.equal(snap.character.flightKnownV, 3);
+  assert.equal(snap.character.flightKnownV, 4);
   snap.character.flightKnown = [10, 19, 67, 74]; delete snap.character.flightKnownV;       // what an older bridge wrote
   fs.writeFileSync(file, JSON.stringify(snap));
   assert.deepEqual(F.createFeed({ dir: t.state, store: {} }).state.character.flightKnown, [], 'forgotten');
-  snap.character.flightKnownV = 3;
+  snap.character.flightKnownV = 4;
   fs.writeFileSync(file, JSON.stringify(snap));
   assert.deepEqual(F.createFeed({ dir: t.state, store: {} }).state.character.flightKnown, [10, 19, 67, 74], 'kept once it carries the version');
 });

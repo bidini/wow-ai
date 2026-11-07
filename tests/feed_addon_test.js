@@ -1079,17 +1079,15 @@ test('flight points: a distant node is not a found one, and same-named nodes are
   assert.deepEqual(flightPoints(collect(vm, 40)).nodes.map(n => [n.id, n.state]), [[18, 1], [19, 3], [11, 0], [10, 2]], 'reachable 1, distant 3, none 2; the two Booty Bays are not confused');
 });
 
-test('flight points: the client says which nodes are undiscovered and which faction they are for, and that is used when it is there', () => {
+test('flight points: the faction is sent; the client\'s isUndiscovered flag is not trusted (it is false for every node on the Forever client)', () => {
   const vm = flightVM(`
     STUB.taxi = {
       { nodeID = 10, name = "The Sepulcher, Silverpine Forest", position = { x = 0.4110, y = 0.2980 }, isUndiscovered = false, faction = 1 },
-      { nodeID = 11, name = "Undercity, Tirisfal", position = { x = 0.4471, y = 0.2557 }, isUndiscovered = false, faction = 1, state = 0 },
-      { nodeID = 13, name = "Tarren Mill, Hillsbrad", position = { x = 0.4790, y = 0.3180 }, isUndiscovered = true, faction = 1 },
-      { nodeID = 6, name = "Ironforge, Dun Morogh", position = { x = 0.4870, y = 0.5240 }, isUndiscovered = true, faction = 2 },
+      { nodeID = 6, name = "Ironforge, Dun Morogh", position = { x = 0.4870, y = 0.5240 }, isUndiscovered = false, faction = 2 },
       { nodeID = 19, name = "Booty Bay, Stranglethorn", position = { x = 0.4411, y = 0.9352 }, isUndiscovered = false, faction = 0 },
       { nodeID = 99, name = "Somewhere", position = { x = 0.5, y = 0.5 } },
     }`);
   const fp = flightPoints(collect(vm, 70));
-  assert.deepEqual(fp.nodes.map(n => [n.id, n.state, n.faction]), [[10, 4, 1], [11, 0, 1], [13, 5, 1], [6, 5, 2], [19, 4, 0], [99, 9, 9]],
-    'discovered 4, undiscovered 5 (a current node stays 0), faction 0 neutral / 1 Horde / 2 Alliance / 9 unknown');
+  assert.deepEqual(fp.nodes.map(n => [n.id, n.state, n.faction]), [[10, 9, 1], [6, 9, 2], [19, 9, 0], [99, 9, 9]],
+    'no state without a flight master window; faction 0 neutral / 1 Horde / 2 Alliance / 9 unknown');
 });
