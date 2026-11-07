@@ -6,6 +6,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Added
 
+- The route on the world map: the current step and the next ones as numbered diamonds (violet for quest steps, cyan for travel) joined by a line, apart from the round pins of the layers and the game's quest icons. Steps at one place share a marker. `/wow-ai route map on|off`.
 - Route list: a flight, a hearthstone use, a zeppelin ride, finding a flight point and setting the hearthstone are steps of their own, in their own colour. They are ticked automatically once a later quest step is done (or by hand).
 
 ### Removed

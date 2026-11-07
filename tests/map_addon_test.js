@@ -77,7 +77,7 @@ function shownPins(vm) {
     local canvas = WorldMapFrame:GetCanvas()
     local overlay = canvas.children[#canvas.children]
     for _, c in ipairs(overlay.children) do
-      if c.kind == "Button" and c.shown then
+      if c.kind == "Button" and c.shown and not c.fill then
         local label = c.num and c.num.text or ""
         out[#out + 1] = string.format("%.0f,%.0f,%s,%s", c.x, -c.y, label, c.info and c.info.title or "")
       end
@@ -185,4 +185,67 @@ test('navigation left in the saved variables by an older version is dropped at l
   vm.run('STUB.FireEvent("PLAYER_LOGIN")');
   assert.equal(vm.evaluate('WoWAIMapDB.nav'), null);
   assert.equal(vm.evaluate('WoWAIMapDB.navPos'), null);
+});
+
+// ---- the planner's route on the world map: numbered diamonds, apart from the layers' round pins --------------------------------------
+function routeOnMap() {
+  const vm = newVM();
+  vm.run(`
+    STUB.log, STUB.done = {}, {}
+    C_QuestLog = C_QuestLog or {}
+    C_QuestLog.IsOnQuest = function(id) return STUB.log[id] ~= nil end
+    C_QuestLog.IsComplete = function(id) return STUB.log[id] ~= nil and STUB.log[id].ready == true end
+    C_QuestLog.IsQuestFlaggedCompleted = function(id) return STUB.done[id] == true end
+    WoWAIRouteData = { stamp = "r1", steps = {
+      { i = 1, k = "accept", q = 100, t = "Accept: A (Giver)", z = "Loch Modan 50, 40", w = "-", m = 1432, x = 50, y = 40 },
+      { i = 2, k = "fly", t = "Fly: X to Y", z = "Loch Modan 60, 50", w = "-", m = 1432, x = 60, y = 50 },
+      { i = 3, k = "turnin", q = 100, t = "Turn in: A (Giver)", z = "Loch Modan 60, 50", w = "-", m = 1432, x = 60, y = 50 },
+      { i = 4, k = "hearth", t = "Use the hearthstone", z = "Inn", w = "-" },
+      { i = 5, k = "kill", q = 200, t = "Kill 8: B for C", z = "Loch Modan 55, 70", w = "-", m = 1432, x = 55, y = 70 },
+    } }`);
+  vm.run(fs.readFileSync(path.join(ADDON, 'Route.lua'), 'utf8'), 'WoWAI');
+  vm.run('WoWAIRoute.Reload(); WoWAIMap.Refresh()');
+  return vm;
+}
+function routePins(vm) {
+  vm.run(`
+    local out = {}
+    local canvas = WorldMapFrame:GetCanvas()
+    local overlay = canvas.children[#canvas.children]
+    for _, c in ipairs(overlay.children) do
+      if c.kind == "Button" and c.shown and c.fill then
+        out[#out + 1] = string.format("%.0f,%.0f,%s,%s", c.x * (c.scale or 1), -c.y * (c.scale or 1), c.num.text, (c.info.label or ""):gsub("\\n", "|"))
+      end
+    end
+    RESULT = table.concat(out, ";")`);
+  const s = vm.evaluate('RESULT');
+  return s ? s.split(';') : [];
+}
+
+test('route steps are drawn as numbered markers; steps at one place share one, and a step with no position is left out', () => {
+  const vm = routeOnMap();
+  assert.deepEqual(routePins(vm), ['500,280,1,1. Accept: A (Giver)', '600,350,2,2. Fly: X to Y|3. Turn in: A (Giver)', '550,490,5,5. Kill 8: B for C']);
+});
+
+test('route markers are not the layers\' round pins and do not count as them', () => {
+  const vm = routeOnMap();
+  assert.deepEqual(shownPins(vm), [], 'the round pins of the layers are untouched');
+});
+
+test('route markers start at the current step, follow it, and appear on the continent map too', () => {
+  const vm = routeOnMap();
+  vm.run('STUB.log[100] = { ready = false }; WoWAIRoute.Refresh()');
+  assert.match(routePins(vm)[0], /^600,350,2,/, 'the accepted quest ticks step 1: markers start at the flight');
+  vm.run('STUB.shownMap = 1415; WoWAIMap.Refresh()');
+  assert.match(routePins(vm)[0], /^(\d+),(\d+),2,/);
+  // 1432 (60, 50) -> 1415 (0.56, 0.45) on a 1000x700 canvas.
+  assert.equal(routePins(vm)[0], '560,315,2,2. Fly: X to Y|3. Turn in: A (Giver)');
+});
+
+test('/wow-ai route map off hides the markers and on shows them', () => {
+  const vm = routeOnMap();
+  vm.run('WoWAIRoute.Command("map off")');
+  assert.deepEqual(routePins(vm), []);
+  vm.run('WoWAIRoute.Command("map on")');
+  assert.equal(routePins(vm).length, 3);
 });

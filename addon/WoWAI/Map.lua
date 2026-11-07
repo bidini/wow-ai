@@ -149,6 +149,9 @@ local overlay
 local pins, pinCount = {}, 0
 local lines, lineCount = {}, 0
 local nodePins, nodeCount = {}, 0
+local routePins, routeCount = {}, 0
+local ROUTE_SIZE = 14
+local ROUTE_COLOR = { quest = { 0.9, 0.3, 1 }, travel = { 0.2, 0.9, 1 } } -- violet diamonds for quest steps, cyan for travel: not the round yellow/blue game icons
 
 local function ShowTip(self)
 	if not self.info then return end
@@ -175,6 +178,29 @@ local function NewPin(size)
 	b.num:SetTextColor(0, 0, 0)
 	b:SetScript("OnEnter", ShowTip)
 	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	return b
+end
+
+-- A route step marker: a numbered diamond with a dark edge, unlike the round pins of the layers and the game's own quest icons.
+local function NewRoutePin()
+	local b = CreateFrame("Button", nil, overlay)
+	b:SetSize(ROUTE_SIZE, ROUTE_SIZE)
+	b.edge = b:CreateTexture(nil, "ARTWORK")
+	b.edge:SetPoint("CENTER")
+	b.edge:SetSize(ROUTE_SIZE + 5, ROUTE_SIZE + 5)
+	b.edge:SetColorTexture(0, 0, 0, 0.9)
+	b.edge:SetRotation(math.pi / 4)
+	b.fill = b:CreateTexture(nil, "OVERLAY")
+	b.fill:SetPoint("CENTER")
+	b.fill:SetSize(ROUTE_SIZE, ROUTE_SIZE)
+	b.fill:SetRotation(math.pi / 4)
+	b.num = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	b.num:SetPoint("CENTER", 0, 0)
+	b.num:SetTextColor(1, 1, 1)
+	if b.SetMouseClickEnabled then b:SetMouseClickEnabled(false) end -- hover shows the tooltip; clicks go to the map
+	b:SetScript("OnEnter", ShowTip)
+	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	b.info = {}
 	return b
 end
 
@@ -263,17 +289,53 @@ local function DrawNodes(mapID, scale)
 	end
 end
 
+-- The planner's route (Route.lua): the current step and the next ones, joined by a line, steps at one place sharing a marker.
+local function DrawRoute(mapID, scale)
+	local R = WoWAIRoute
+	local steps = R and R.MapSteps and R.MapSteps() or {}
+	local prev
+	local group
+	for _, st in ipairs(steps) do
+		local x, y = Project(st.m, st.x / 100, st.y / 100, mapID)
+		if x and x >= 0 and x <= 1 and y >= 0 and y <= 1 then
+			if group and math.abs(group.x - x) < 0.004 and math.abs(group.y - y) < 0.004 then
+				group.lines[#group.lines + 1] = st.i .. ". " .. st.t
+				group.pin.info.label = table.concat(group.lines, "\n")
+			else
+				routeCount = routeCount + 1
+				local b = routePins[routeCount]
+				if not b then b = NewRoutePin(); routePins[routeCount] = b end
+				local c = st.travel and ROUTE_COLOR.travel or ROUTE_COLOR.quest
+				b.fill:SetColorTexture(c[1], c[2], c[3], 1)
+				b.num:SetText(tostring(st.i))
+				b:SetFrameLevel(overlay:GetFrameLevel() + 20)
+				b.info.title = "Route step " .. st.i .. (st.current and " (now)" or "")
+				b.info.label = st.i .. ". " .. st.t
+				b.info.hint = nil
+				Place(b, x, y, st.current and scale * 1.35 or scale)
+				if prev then AddLine(prev[1], prev[2], x, y, ROUTE_COLOR.quest, 1.5 * scale) end
+				group = { x = x, y = y, pin = b, lines = { st.i .. ". " .. st.t } }
+				prev = { x, y }
+			end
+		else
+			prev, group = nil, nil
+		end
+	end
+end
+
 function M.Refresh()
 	if not overlay or not WorldMapFrame:IsShown() then return end
 	for i = 1, pinCount do pins[i]:Hide() end
 	for i = 1, lineCount do lines[i]:Hide() end
 	for i = 1, nodeCount do nodePins[i]:Hide() end
-	pinCount, lineCount, nodeCount = 0, 0, 0
+	for i = 1, routeCount do routePins[i]:Hide() end
+	pinCount, lineCount, nodeCount, routeCount = 0, 0, 0, 0
 	local mapID = WorldMapFrame:GetMapID()
 	if not mapID then return end
 	local scale = 1 / CanvasScale()
 	overlay.drawnScale = CanvasScale()
 	DrawNodes(mapID, scale)
+	DrawRoute(mapID, scale)
 	for _, l in ipairs(Layers()) do
 		if not mdb.hidden[l.name] then
 			local prev, first
