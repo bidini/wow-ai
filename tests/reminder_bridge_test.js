@@ -164,4 +164,5 @@ test('a state file from when this was called the coach is carried over', () => {
   assert.equal(state.reminder.counter, 8);
   assert.equal(state.reminderSig, 4);
   assert.ok(signal(S, 4) > 0);
+  for (const k of [1, 2, 3]) assert.ok(signal(S, k) > 0, `signal ${k} is valid too: the game finds the newest by assuming the valid files are 1..n with no gap`);
 });

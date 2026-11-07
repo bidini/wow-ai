@@ -806,7 +806,13 @@ function reminderBeat() {
   if (!fs.existsSync(path.join(cfg.addonDir, 'WoWAI', 'reminder'))) return;
   state.reminderSig = ((state.reminderSig || 0) % REMINDER_MAX) + 1;
   const k = state.reminderSig;
-  try { atomicWrite(reminderFile(k), SILENT_WAV); } catch {}
+  // The game finds the newest valid file by assuming the valid ones are 1..k with no gap, so keep it so
+  // (a state carried over from the coach, or files made by an older install, can leave holes).
+  for (let j = 1; j <= k; j++) {
+    let size = 0;
+    try { size = fs.statSync(reminderFile(j)).size; } catch {}
+    if (!size || j === k) { try { atomicWrite(reminderFile(j), SILENT_WAV); } catch {} }
+  }
   // The valid files form a prefix: what lies ahead stays empty (all of it after a wrap).
   const ahead = k === 1 ? REMINDER_MAX - 1 : 50;
   for (let j = 1; j <= ahead; j++) {
