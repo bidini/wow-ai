@@ -111,6 +111,36 @@ end
 -- Used by Feed.lua to describe where each map lies on its continent (docs/DISTANCE.md).
 M.ContinentOf, M.ContinentYards = ContinentOf, ContinentYards
 
+local atan2 = math.atan2 or math.atan -- Lua 5.1 in game; 5.3 in the test VM
+
+-- The player's position as (continent, cx, cy) in continent map space.
+local function PlayerOnContinent()
+	local mapID = Try(C_Map.GetBestMapForUnit, "player")
+	if not mapID then return end
+	local pos = Try(C_Map.GetPlayerMapPosition, mapID, "player")
+	if not pos then return end
+	local px, py = pos.x, pos.y
+	if not px or (px == 0 and py == 0) then return end
+	local cont = ContinentOf(mapID)
+	if not cont then return end
+	local cx, cy = Project(mapID, px, py, cont)
+	if cx then return cont, cx, cy end
+end
+
+-- Yards and bearing (radians, counter-clockwise from north) from the player to a point (map id, x and y in map percent), or nil and the
+-- reason as text. Used by the route arrow (Route.lua).
+function M.Heading(m, x, y)
+	local cont, px, py = PlayerOnContinent()
+	if not cont then return nil, "no position here" end
+	if ContinentOf(m) ~= cont then return nil, "on another continent" end
+	local tx, ty = Project(m, x / 100, y / 100, cont)
+	if not tx then return nil, "cannot place this point" end
+	local w, h = ContinentYards(cont)
+	local east, south = (tx - px) * (w or 1), (ty - py) * (h or 1)
+	local dist = w and math.sqrt(east * east + south * south) or nil
+	return dist, atan2(-east, -south)
+end
+
 ---------------------------------------------------------------------------
 -- World map drawing
 ---------------------------------------------------------------------------

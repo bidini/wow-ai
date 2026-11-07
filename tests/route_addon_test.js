@@ -27,7 +27,19 @@ function newVM() {
     lua.lua_pop(L, 1);
     return s;
   };
-  load(fs.readFileSync(path.join(__dirname, 'wow_stub.lua'), 'utf8'));
+  // The plain stub plus what the map code needs (lines, rotation, frame levels), as in map_addon_test.
+  let stub = fs.readFileSync(path.join(__dirname, 'wow_stub.lua'), 'utf8');
+  stub += `
+function Methods.CreateLine(self, name, layer) local l = NewObjectPublic("Line", name, self); table.insert(self.textures, l); return l end
+function Methods.SetRotation(self, r) self.rotation = r end
+function Methods.SetVertexColor(self, r, g, b, a) self.vcolor = { r, g, b, a } end
+function Methods.SetScale(self, s) self.scale = s end
+function Methods.SetAllPoints(self, rel) if rel then self.width, self.height = rel.width, rel.height end end
+function Methods.GetFrameLevel(self) return self.level or 1 end
+function Methods.SetFrameLevel(self, l) self.level = l end
+`;
+  stub = stub.replace('local function NewObject(', 'function NewObjectPublic(').replace(/NewObject\(/g, 'NewObjectPublic(');
+  load(stub);
   load(`
     STUB.log, STUB.done = {}, {}
     C_QuestLog = C_QuestLog or {}
@@ -160,4 +172,103 @@ test('the route module only reads and draws: it calls nothing that acts', () => 
   for (const banned of ['SendChatMessage', 'RunScript', 'CastSpellByName', 'UseAction', 'TargetUnit', 'AcceptQuest', 'CompleteQuest', 'AbandonQuest', 'QueryAuctionItems', 'BuyMerchantItem', 'ChatEdit_SendText', ':Click(', 'SecureCmdOptionParse', 'loadstring']) {
     assert.ok(!src.includes(banned), `Route.lua must not use ${banned}`);
   }
+});
+
+// ---- the arrow: bearing and distance to the current step (map stubs as in map_addon_test: Loch Modan 1432 inside Eastern Kingdoms 1415) ----
+const MAP_STUB = `
+Enum = { UIMapType = { Continent = 2, Zone = 3 } }
+local MAPS = { [1432] = { name = "Loch Modan", mapType = 3, parentMapID = 1415 }, [1415] = { name = "Eastern Kingdoms", mapType = 2, parentMapID = 947 }, [947] = { name = "Azeroth", mapType = 1, parentMapID = 0 } }
+C_Map.GetMapInfo = function(id) local m = MAPS[id]; if m then return { name = m.name, mapType = m.mapType, parentMapID = m.parentMapID, mapID = id } end end
+C_Map.GetBestMapForUnit = function() return STUB.playerMap or 1432 end
+C_Map.GetMapRectOnMap = function(child, parent) if child == 1432 and parent == 1415 then return 0.5, 0.6, 0.4, 0.5 end end
+function CreateVector2D(x, y) return { x = x, y = y } end
+C_Map.GetWorldPosFromMapPos = function(id, v) if id == 1415 then return 0, { x = v.x * 10000, y = v.y * 15000 } end end
+function GetPlayerFacing() return STUB.facing or 0 end
+function Methods_CreateLine() end
+local canvas = CreateFrame("Frame", "WorldMapCanvas")
+canvas.width, canvas.height = 1000, 700
+WorldMapFrame = CreateFrame("Frame", "WorldMapFrame")
+WorldMapFrame.shown = true
+function WorldMapFrame:GetCanvas() return canvas end
+function WorldMapFrame:GetMapID() return STUB.shownMap or 1432 end
+function WorldMapFrame:GetCanvasScale() return 1 end
+function WorldMapFrame:OnMapChanged() end
+local T = getmetatable(canvas).__index
+MINING, HERBALISM = "Mining", "Herbalism"
+`;
+
+// Player at Loch Modan 50,50. A stop at 50,40 is 150 yd due north; 60,50 is 100 yd east (Loch Modan is 1000 x 1500 yd on this map stub).
+const GO = [
+  { k: 'accept', q: 1, t: 'Accept: A', z: 'Loch Modan 50, 40', w: 'walk', m: 1432, x: 50, y: 40 },
+  { k: 'accept', q: 2, t: 'Accept: B', z: 'Loch Modan 60, 50', w: 'walk', m: 1432, x: 60, y: 50 },
+];
+const luaDataXY = (steps, stamp = 'run1') => `WoWAIRouteData = { stamp = ${JSON.stringify(stamp)}, steps = {\n` +
+  steps.map((s, i) => `\t{ i = ${i + 1}, k = ${JSON.stringify(s.k)}, ${s.q ? `q = ${s.q}, ` : ''}t = ${JSON.stringify(s.t)}, z = ${JSON.stringify(s.z)}, w = ${JSON.stringify(s.w)}${s.m ? `, m = ${s.m}, x = ${s.x}, y = ${s.y}` : ''}${s.am ? `, am = ${s.am}, ax = ${s.ax}, ay = ${s.ay}, al = ${JSON.stringify(s.al)}` : ''} },`).join('\n') + '\n} }';
+function arrowVM2(steps, extra = '') {
+  const vm = newVM();
+  vm.load(MAP_STUB);
+  vm.load(luaDataXY(steps));
+  vm.load(fs.readFileSync(path.join(ADDON, 'Map.lua'), 'utf8'), 'WoWAI');
+  vm.load('STUB.posX, STUB.posY = 0.5, 0.5; STUB.facing = 0');
+  vm.load(extra);
+  vm.load(fs.readFileSync(path.join(ADDON, 'Route.lua'), 'utf8'), 'WoWAI');
+  vm.load('STUB.FireEvent("ADDON_LOADED", "WoWAI"); STUB.FireEvent("PLAYER_LOGIN")');
+  return vm;
+}
+const near = (a, b) => Math.abs(Number(a) - b) < 1e-6;
+
+test('the arrow shows the distance in yards and turns toward the current step', () => {
+  const vm = arrowVM2(GO);
+  vm.load('WoWAIRoute.UpdateArrow()');
+  assert.match(vm.evaluate('WoWAIRouteArrow.text.text'), /^150 yd/);
+  assert.ok(near(vm.evaluate('WoWAIRouteArrow.arrow.rotation'), 0), 'north is straight up');
+  vm.load('STUB.facing = math.pi / 2; WoWAIRoute.UpdateArrow()');
+  assert.ok(near(vm.evaluate('WoWAIRouteArrow.arrow.rotation'), -Math.PI / 2), 'facing west: the stop is to the right');
+});
+
+test('the arrow follows the current step as steps are ticked off, and hides when the route is done', () => {
+  const vm = arrowVM2(GO);
+  vm.load('STUB.log[1] = { ready = false }; WoWAIRoute.Refresh(); WoWAIRoute.UpdateArrow()');
+  assert.match(vm.evaluate('WoWAIRouteArrow.text.text'), /^100 yd/, 'step 2 is 100 yd east');
+  assert.ok(near(vm.evaluate('WoWAIRouteArrow.arrow.rotation'), -Math.PI / 2), 'east is a clockwise quarter turn');
+  vm.load('STUB.log[2] = { ready = false }; WoWAIRoute.Refresh(); WoWAIRoute.UpdateArrow()');
+  assert.equal(vm.evaluate('WoWAIRouteArrow.shown'), 'false');
+});
+
+test('a waypoint (a flight master, a zeppelin tower) is the target while the player is nearer to it than to the stop', () => {
+  const steps = [{ k: 'accept', q: 1, t: 'Accept: A', z: 'Far', w: 'fly', m: 1432, x: 80, y: 90, am: 1432, ax: 52, ay: 50, al: 'the flight master' }];
+  const vm = arrowVM2(steps);
+  vm.load('WoWAIRoute.UpdateArrow()');
+  assert.match(vm.evaluate('WoWAIRouteArrow.text.text'), /^20 yd.*the flight master/);
+  vm.load('STUB.posX, STUB.posY = 0.78, 0.88; WoWAIRoute.UpdateArrow()');
+  assert.doesNotMatch(vm.evaluate('WoWAIRouteArrow.text.text'), /flight master/, 'near the stop now: it points at the stop');
+});
+
+test('the arrow says so when the target is on another continent or there is no position, and can be switched off', () => {
+  const steps = [{ k: 'accept', q: 1, t: 'Accept: A', z: 'Away', w: 'zeppelin', m: 999, x: 50, y: 50 }];
+  const vm = arrowVM2(steps);
+  vm.load('WoWAIRoute.UpdateArrow()');
+  assert.equal(vm.evaluate('WoWAIRouteArrow.shown'), 'true');
+  assert.match(vm.evaluate('WoWAIRouteArrow.text.text'), /another continent|cannot place/);
+  assert.equal(vm.evaluate('WoWAIRouteArrow.arrow.shown'), 'false');
+  const vm2 = arrowVM2(GO);
+  vm2.load('STUB.playerMap = 999; WoWAIRoute.UpdateArrow()');
+  assert.equal(vm2.evaluate('WoWAIRouteArrow.text.text'), 'no position here');
+  const vm3 = arrowVM2(GO);
+  vm3.load('WoWAIRoute.Command("arrow off")');
+  assert.equal(vm3.evaluate('WoWAIRouteArrow.shown'), 'false');
+  vm3.load('WoWAIRoute.Command("arrow on")');
+  assert.equal(vm3.evaluate('WoWAIRouteArrow.shown'), 'true');
+});
+
+test('right-clicking the arrow ticks the current step, like /wow-ai route skip', () => {
+  const vm = arrowVM2(GO);
+  vm.load('local a = WoWAIRouteArrow; a.scripts.OnMouseUp(a, "RightButton")');
+  assert.equal(vm.evaluate('WoWAIRoute.State().current'), '2');
+});
+
+test('a route without coordinates shows no arrow and raises no error', () => {
+  const vm = routeVM();
+  vm.load('WoWAIRoute.UpdateArrow()');
+  assert.equal(vm.evaluate('WoWAIRouteArrow'), null);
 });

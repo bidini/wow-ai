@@ -10,7 +10,8 @@ local LIST_ROWS = 12
 local LIST_WIDTH = 360
 local MARGIN_MAC = 96 -- the Dock covers the left edge of a Mac screen (the same margin as the pixel strip)
 local localDB = { skips = {} }
-local list, data
+local list, data, arrow
+local ARROW = "Interface\\Minimap\\MinimapArrow"
 
 local function Try(f, ...)
 	if type(f) ~= "function" then return nil end
@@ -110,11 +111,13 @@ end
 function M.Refresh()
 	if not data or type(data.steps) ~= "table" or #data.steps == 0 then
 		if list then list:Hide() end
+		if arrow then arrow:Hide() end
 		return
 	end
 	if not list then BuildList() end
 	if DB().off then list:Hide(); return end
 	list:Show()
+	M.UpdateArrow()
 	local steps = data.steps
 	local state = M.State()
 	local cur = state.current
@@ -145,6 +148,85 @@ function M.Reload()
 	M.Refresh()
 end
 
+-- ---- the arrow: the way to the current step -------------------------------------------------------------------------------------------
+local function BuildArrow()
+	arrow = CreateFrame("Frame", "WoWAIRouteArrow", UIParent, "BackdropTemplate")
+	arrow:SetSize(260, 44)
+	arrow:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+	arrow:SetBackdropColor(0, 0, 0, 0.7)
+	local p = DB().arrowPos
+	if p then arrow:SetPoint(p[1], UIParent, p[1], p[2], p[3]) else arrow:SetPoint("TOP", UIParent, "TOP", 0, -120) end
+	arrow:SetMovable(true)
+	arrow:EnableMouse(true)
+	arrow:RegisterForDrag("LeftButton")
+	arrow:SetScript("OnDragStart", arrow.StartMoving)
+	arrow:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		local point, _, _, x, y = self:GetPoint()
+		DB().arrowPos = { point, x, y }
+	end)
+	arrow:SetScript("OnMouseUp", function(_, button)
+		if button == "RightButton" then M.Command("skip") end
+	end)
+	arrow.arrow = arrow:CreateTexture(nil, "ARTWORK")
+	arrow.arrow:SetSize(34, 34)
+	arrow.arrow:SetPoint("LEFT", 6, 0)
+	arrow.arrow:SetTexture(ARROW)
+	arrow.title = arrow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	arrow.title:SetPoint("TOPLEFT", 46, -7)
+	arrow.title:SetPoint("RIGHT", -8, 0)
+	arrow.title:SetJustifyH("LEFT")
+	arrow.title:SetWordWrap(false)
+	arrow.text = arrow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	arrow.text:SetPoint("BOTTOMLEFT", 46, 8)
+	arrow.text:SetPoint("RIGHT", -8, 0)
+	arrow.text:SetJustifyH("LEFT")
+	arrow.text:SetWordWrap(false)
+	local since = 0
+	arrow:SetScript("OnUpdate", function(_, elapsed)
+		since = since + (elapsed or 0)
+		if since < 0.1 then return end
+		since = 0
+		M.UpdateArrow()
+	end)
+	arrow:Hide()
+end
+
+-- The step's stop, or the waypoint on the way to it (a flight master, a zeppelin tower) while the player is nearer to that than to the stop.
+local function Target(s)
+	local WM = WoWAIMap
+	if not WM or not WM.Heading then return nil, "no map module" end
+	local d1, b1 = nil, nil
+	if type(s.m) == "number" then d1, b1 = WM.Heading(s.m, s.x, s.y) end
+	if type(s.am) == "number" then
+		local d2, b2 = WM.Heading(s.am, s.ax, s.ay)
+		if d2 and (not d1 or d2 < d1) then return d2, b2, s.al end
+	end
+	return d1, b1, nil
+end
+
+function M.UpdateArrow()
+	local steps = data and data.steps
+	local s = steps and steps[M.State().current]
+	if not s or type(s.m) ~= "number" or DB().arrowOff then
+		if arrow then arrow:Hide() end
+		return
+	end
+	if not arrow then BuildArrow() end
+	arrow:Show()
+	arrow.title:SetText(s.t or "")
+	local dist, bearing, label = Target(s)
+	if not dist and type(bearing) == "string" then
+		arrow.arrow:Hide()
+		arrow.text:SetText(bearing)
+		return
+	end
+	arrow.arrow:Show()
+	local facing = Try(GetPlayerFacing)
+	if facing and bearing then arrow.arrow:SetRotation(bearing - facing) else arrow.arrow:SetRotation(0) end
+	arrow.text:SetText(dist and string.format("%d yd  |cff9aa0a6%s|r", math.floor(dist + 0.5), label or s.z or "") or (label or s.z or ""))
+end
+
 function M.Toggle(i)
 	local skips = DB().skips
 	skips[i] = (not skips[i]) or nil
@@ -157,6 +239,10 @@ function M.Command(msg)
 	local db = DB()
 	if cmd == "off" then db.off = true; M.Refresh(); Say("step list off")
 	elseif cmd == "on" then db.off = nil; M.Refresh(); Say("step list on")
+	elseif cmd == "arrow" then
+		if rest == "off" then db.arrowOff = true elseif rest == "on" then db.arrowOff = nil else Say("/wow-ai route arrow on|off") return end
+		M.UpdateArrow()
+		Say("arrow " .. rest)
 	elseif cmd == "reset" then db.skips = {}; M.Refresh(); Say("hand-made ticks cleared")
 	elseif cmd == "skip" or cmd == "undo" then
 		local n = tonumber(rest) or (cmd == "skip" and M.State().current) or nil

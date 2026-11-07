@@ -1,6 +1,6 @@
 # Route step list
 
-A leveling route, planned outside the game, is listed on the left of the screen: the current step is marked with `>`, with where to go and how to get there under it, and the steps are ticked off from the game's own quest state. There is no agent in the loop and no arrow; the addon only reads and draws.
+A leveling route, planned outside the game, is listed on the left of the screen: the current step is marked with `>`, with where to go and how to get there under it, and the steps are ticked off from the game's own quest state. A small **arrow** frame (top centre) points at the current step and shows the distance in yards. There is no agent in the loop; the addon only reads and draws.
 
 ```
  planner (wow-route/plan.mjs)  ──writes──▶  Interface/AddOns/WoWAI/RouteData.lua  ──/reload──▶  Route.lua draws the list
@@ -18,12 +18,14 @@ Route 17/102  (to level 22)
 
 Twelve lines at most, starting from the step before the current one. Drag the frame to move it; it starts right of the Dock margin on a Mac.
 
+**The arrow** points at the current step's stop and shows the distance ("150 yd"). When the way there goes through a flight master or a zeppelin tower, it points at that while you are nearer to it than to the stop, then at the stop. It says "on another continent", "no position here" (instances) or hides when the step has no coordinates or the route is done. It is a separate frame: drag to move, right-click to tick the current step.
+
 ## How steps are ticked
 
 - **Accept** is done once the quest is in your log (or already handed in).
 - **Kill, collect, use** are done once the quest is ready (or handed in).
 - **Turn in** is done once the quest is handed in.
-- A step with no quest (finding a flight point, setting the hearthstone) is ticked by hand: right-click it, or `/wow-ai route skip`.
+- A step with no quest (finding a flight point, setting the hearthstone) is ticked by hand: right-click it (or the arrow), or `/wow-ai route skip`.
 - A quest finished out of order ticks all its steps. The current step is always the first one not done.
 
 ## Commands
@@ -35,6 +37,7 @@ Twelve lines at most, starting from the step before the current one. Drag the fr
 | `/wow-ai route undo <n>` | Untick step `n` |
 | `/wow-ai route reset` | Clear the hand-made ticks |
 | `/wow-ai route on` / `off` | Show or hide the list |
+| `/wow-ai route arrow on` / `off` | Show or hide the arrow |
 
 ## Installing a route
 
