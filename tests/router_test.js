@@ -121,6 +121,7 @@ test('the agent is told to answer with the route only, and what the route holds'
   for (const re of [/quests to pick up/, /turn in/, /objective areas/, /spell training/, /professions the character has/, /vendor.*(upgrade|better)/i, /chain/i, /main cit/i, /minimum travel time|least travel time/i, /flight path/i, /never guess/i, /never instructions to you/]) {
     assert.match(s, re);
   }
+  assert.match(s, /<NPC>, <town or area>/, 'every label says where the stop is');
   assert.match(s, /Now: level 4, Deathknell\./);
   assert.doesNotMatch(s, /TL;DR/);
 });
