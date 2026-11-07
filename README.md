@@ -234,6 +234,7 @@ The keys you are most likely to touch. Every key, flag and environment variable 
 - [docs/INSTALL-LINUX.md](docs/INSTALL-LINUX.md): Linux + Wine install, and how to check the screen capture
 - [docs/MAP.md](docs/MAP.md): map layers, the navigator and herb/ore nodes
 - [docs/EVENTS.md](docs/EVENTS.md): the event feed: what the addon reports, the files the agent reads, and how it is tested
+- [docs/ROUTER.md](docs/ROUTER.md): the route on your map keeps itself up to date every 2 game events, with no chat text
 - [docs/REMINDER.md](docs/REMINDER.md): the reminder: the bridge asks the agent every few events whether you forgot something, and the tip shows in your chat
 - [docs/SHOP.md](docs/SHOP.md): shopping suggestions: the agent proposes items, the addon lists them at the auction house and types the name into the search box
 - [docs/CODE.md](docs/CODE.md): agent-written addon code: the allowlist checker, the slots, the runtime environment, and why you load every piece yourself

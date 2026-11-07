@@ -33,7 +33,7 @@ process.stdin.on('end', () => {
 
 function sandbox(reminderCfg) {
   const S = fs.mkdtempSync(path.join(os.tmpdir(), 'reminder-bridge-'));
-  for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js', 'code.js', 'lint.js', 'reminder.js', 'install-slots.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
+  for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js', 'code.js', 'lint.js', 'reminder.js', 'router.js', 'install-slots.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
   fs.mkdirSync(path.join(S, 'addons', 'WoWAI'), { recursive: true });
   fs.writeFileSync(path.join(S, 'addons', 'WoWAI', 'WoWAI.toc'), '## Interface: 16001\n');
   fs.mkdirSync(path.join(S, 'proj'), { recursive: true });
@@ -46,6 +46,7 @@ function sandbox(reminderCfg) {
   cfg.slots = 3;
   cfg.agents.claude.path = path.join(S, 'fake-claude');
   cfg.reminder = reminderCfg === undefined ? { minSeconds: 0 } : reminderCfg;
+  cfg.router = { enabled: false };   // the route updates are tested in router_bridge_test.js
   fs.writeFileSync(path.join(S, 'config.json'), JSON.stringify(cfg, null, 2));
   const r = spawnSync(process.execPath, ['install-slots.js'], { cwd: S, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);

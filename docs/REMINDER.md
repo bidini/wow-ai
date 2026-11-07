@@ -1,6 +1,6 @@
 # Reminder
 
-While you play, the bridge asks the agent on its own, after every few game events, whether you forgot something or could do something better. Most checks end in "nothing"; a real tip shows up as a few lines in your game chat. You do not type anything.
+While you play, the bridge asks the agent on its own, after every few game events, whether you forgot something or could do something better. Most checks end in "nothing"; a real reminder shows up as one or two lines in your game chat. It does not speak about quests, routes, trainers or vendors: the map route ([ROUTER.md](ROUTER.md)) covers those, without text. You do not type anything.
 
 ```
  game ──▶ event feed (quests, zones, level-ups…) ──▶ bridge counts events ──▶ every 3rd: one agent run

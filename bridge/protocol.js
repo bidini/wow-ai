@@ -421,7 +421,7 @@ function validateMapCommand(c, why = []) {
   if (c.points.length > MAP_LIMITS.pointsPerLayer) why.push(`layer ${layer}: kept the first ${MAP_LIMITS.pointsPerLayer} points`);
   if (points.length < c.points.slice(0, MAP_LIMITS.pointsPerLayer).length) why.push(`layer ${layer}: dropped invalid points`);
   if (!points.length) { why.push(`layer ${layer}: no valid points`); return null; }
-  return { op: 'set', layer, title: cleanText(c.title || layer, MAP_LIMITS.title), ordered: !!c.ordered, loop: !!c.loop, points };
+  return { op: 'set', layer, title: cleanText(c.title || layer, MAP_LIMITS.title), ordered: !!c.ordered, loop: !!c.loop, quiet: !!c.quiet, points };
 }
 
 function newMap(epoch) {
@@ -443,7 +443,7 @@ function applyMapCommands(map, cmds, now = Date.now()) {
     } else if (c.op === 'clear') {
       if (map.layers[c.layer]) { delete map.layers[c.layer]; changed = true; notes.push(`cleared layer ${c.layer}`); }
     } else {
-      map.layers[c.layer] = { title: c.title, ordered: c.ordered, loop: c.loop, points: c.points, t: now };
+      map.layers[c.layer] = { title: c.title, ordered: c.ordered, loop: c.loop, quiet: c.quiet, points: c.points, t: now };
       changed = true;
       notes.push(`layer ${c.layer}: ${c.points.length} point(s)`);
     }
@@ -493,7 +493,7 @@ function parseMapFile(src) {
 function luaMap(map) {
   const lines = ['\tmap = {', `\t\tepoch = ${luaStr(map.epoch)},`, `\t\tversion = ${Number(map.version) || 0},`, '\t\tlayers = {'];
   for (const [name, l] of Object.entries(map.layers || {})) {
-    lines.push(`\t\t\t{ name = ${luaStr(name)}, title = ${luaStr(l.title)}, ordered = ${l.ordered ? 'true' : 'false'}, loop = ${l.loop ? 'true' : 'false'}, points = {`);
+    lines.push(`\t\t\t{ name = ${luaStr(name)}, title = ${luaStr(l.title)}, ordered = ${l.ordered ? 'true' : 'false'}, loop = ${l.loop ? 'true' : 'false'}${l.quiet ? ', quiet = true' : ''}, points = {`);
     for (const p of l.points) lines.push(`\t\t\t\t{ ${p.m}, ${p.x}, ${p.y}, ${luaStr(p.label)}, ${luaStr(p.kind)} },`);
     lines.push('\t\t\t} },');
   }

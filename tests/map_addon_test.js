@@ -215,3 +215,21 @@ test('/wow-ai map hide, show, nav and stop', () => {
   assert.equal(vm.evaluate('WoWAINavigator.shown'), 'false');
   vm.run('SlashCmdList.WOWAIMAP("")'); // status never errors
 });
+
+const QUIET = `{ epoch = "e1", version = VERSION, layers = { { name = "route", title = "Route", ordered = true, loop = false, quiet = true, points = {
+  { 1432, 50, 40, "1. Turn in: A", "turnin" }, { 1432, 60, 50, "2. Train: B", "trainer" } } } } }`;
+
+test('a quiet route prints nothing, starts the arrow, and a changed one starts over at stop 1', () => {
+  const vm = newVM();
+  const prints = () => vm.num('#STUB.prints');
+  const before = prints();
+  vm.run(`WoWAIMap.Sync(${QUIET.replace('VERSION', '1')})`);
+  assert.equal(prints(), before, 'no chat text for a quiet layer');
+  assert.equal(vm.evaluate('WoWAIMapDB.nav.layer'), 'route');
+  vm.run('SlashCmdList.WOWAIMAP("next")');
+  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '2');
+  vm.run(`local m = ${QUIET.replace('VERSION', '2')}; m.layers[1].points[1][4] = "1. Turn in: C"; WoWAIMap.Sync(m)`);
+  assert.equal(prints(), before, 'a changed quiet route is quiet too');
+  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '1', 'the new route starts at its first stop');
+  assert.equal(vm.evaluate('WoWAIMapDB.nav.layer'), 'route');
+});

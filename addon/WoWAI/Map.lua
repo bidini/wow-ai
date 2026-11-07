@@ -482,7 +482,8 @@ function M.Sync(m)
 	if mdb.nav and not FindLayer(mdb.nav.layer) then mdb.nav = nil end
 	for _, l in ipairs(changed) do
 		mdb.hidden[l.name] = nil
-		Print(string.format("%s: %d point(s)%s. Open the map (M) to see it.", l.title or l.name, #l.points, l.ordered and ", route" or ""))
+		-- A quiet layer (the route the bridge keeps up to date on its own) only appears on the map.
+		if not l.quiet then Print(string.format("%s: %d point(s)%s. Open the map (M) to see it.", l.title or l.name, #l.points, l.ordered and ", route" or "")) end
 		-- A new or changed route on the player's continent starts navigation at its first
 		-- stop, unless the player is already following another route.
 		local here = PlayerOnContinent()

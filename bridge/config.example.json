@@ -7,6 +7,7 @@
   "slots": 200,
   "code": { "enabled": false, "slots": 20, "maxBytes": 12000 },
   "reminder": { "enabled": true, "everyEvents": 3, "minSeconds": 60, "maxPerHour": 20 },
+  "router": { "enabled": true, "everyEvents": 2, "minSeconds": 45, "maxPerHour": 30 },
   "actMax": 60,
   "presenceMax": 2000,
   "presenceIntervalMs": 30000,

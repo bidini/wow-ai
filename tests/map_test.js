@@ -85,3 +85,14 @@ test('slot files carry the map as a Lua table the addon can read', () => {
   assert.equal(got, 'ep0ch|1|quests|Route "one"|true|2|1429|48.92|41.61|1. accept "Wolves"\\ ok|quest|explore');
   assert.ok(!P.luaTable('X', [], { now: 1 }).includes('map ='));
 });
+
+test('a quiet layer keeps its flag through validation, the map and the Lua the game reads', () => {
+  const c = P.validateMapCommand({ op: 'set', layer: 'route', quiet: true, points: [pt(1, 1)] });
+  assert.equal(c.quiet, true);
+  assert.equal(P.validateMapCommand({ op: 'set', layer: 'other', points: [pt(1, 1)] }).quiet, false);
+  const map = P.newMap('e');
+  P.applyMapCommands(map, [c, { op: 'set', layer: 'other', points: [pt(2, 2)] }]);
+  const text = P.luaMap(map);
+  assert.match(text, /name = "route"[^\n]*quiet = true/);
+  assert.doesNotMatch(text.split('\n').find(l => /name = "other"/.test(l)), /quiet/);
+});
