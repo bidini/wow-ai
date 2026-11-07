@@ -150,7 +150,7 @@ if (state.reminderSig === undefined && state.coachSig) state.reminderSig = state
 const reminder = feed ? Reminder.createReminder(cfg.reminder || {}, { store: state.reminder }) : null;
 const REMINDER_JOB_BASE = 2000000000;   // never an addon message id
 
-// The router (docs/ROUTER.md): every couple of game events the bridge asks the agent, on its own, for the
+// The router (docs/ROUTER.md): every game event the bridge asks the agent, on its own, for the
 // next route; it is drawn as the "route" layer of the map and nothing is written to the chat.
 // "router": { "enabled": false } turns it off.
 if (!state.router) state.router = {};

@@ -1,5 +1,5 @@
 'use strict';
-// The router (docs/ROUTER.md): after every couple of game events the bridge asks the agent, on its own,
+// The router (docs/ROUTER.md): after every game event the bridge asks the agent, on its own,
 // for the player's next route. The agent answers with a route and no other text; the bridge draws it as
 // the "route" layer of the map (the numbered pins and the arrow). Nothing is written to the chat.
 // This file holds the rules (when an update is due, what the agent is told, what is taken from the
@@ -7,7 +7,7 @@
 
 const { extractMapBlocks } = require('./protocol');
 
-const DEFAULTS = { enabled: true, everyEvents: 2, minSeconds: 45, maxPerHour: 30, timeoutMs: 300000 };
+const DEFAULTS = { enabled: true, everyEvents: 1, minSeconds: 45, maxPerHour: 60, timeoutMs: 300000 };
 const NOT_COUNTED = new Set(['tick']);   // the heartbeat says nothing happened
 const MAX_STOPS = 15;
 const ROUTE_LAYER = 'route';

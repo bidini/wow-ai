@@ -80,7 +80,7 @@ const dayDir = S => {
   return path.join(root, fs.readdirSync(root)[0]);
 };
 
-test('two events start an update; the route becomes a quiet layer and nothing is said', () => {
+test('one batch of events starts an update; the route becomes a quiet layer and nothing is said', () => {
   const S = sandbox();
   routeReply(S, ROUTE);
   const out = inject(S, batch(TWO), 5);
@@ -165,13 +165,16 @@ test('a failed update changes nothing in the game', () => {
   assert.doesNotMatch(inbox(S), /name = "route"/);
 });
 
-test('router.enabled false starts nothing, and one event is not enough', () => {
+test('router.enabled false starts nothing, and a heartbeat alone is not an event', () => {
   const off = sandbox({ enabled: false });
   assert.doesNotMatch(inject(off, batch(TWO), 5), /route #/);
   assert.equal(routeCalls(off).length, 0);
-  const few = sandbox();
-  assert.doesNotMatch(inject(few, batch(TWO.slice(0, 1)), 5), /route #/);
-  assert.equal(routeCalls(few).length, 0);
+  const quiet = sandbox();
+  assert.doesNotMatch(inject(quiet, batch([`E\t${T0}\ttick`]), 5), /route #/);
+  assert.equal(routeCalls(quiet).length, 0);
+  const one = sandbox();
+  routeReply(one, ROUTE);
+  assert.match(inject(one, batch(TWO.slice(0, 1)), 5), /route #1: 1 new event\(s\), asking the agent/);
 });
 
 test('a batch shown twice starts one update, not two', () => {

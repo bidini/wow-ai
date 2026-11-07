@@ -12,21 +12,20 @@ function make(config = {}, t0 = 1000000) {
   return { router, advance: s => { clock += s * 1000; } };
 }
 
-test('an update is due after two events, not before, and the heartbeat does not count', () => {
+test('an update is due after one event, and the heartbeat does not count', () => {
   const { router } = make();
   assert.equal(router.note('a', ['tick', 'tick']), 0);
-  assert.equal(router.note('a', ['qaccept']), 1);
   assert.equal(router.begin(), null);
-  router.note('a', ['zone']);
+  assert.equal(router.note('a', ['qaccept']), 1);
   const run = router.begin();
   assert.equal(run.key, 'a');
-  assert.equal(run.events, 2);
+  assert.equal(run.events, 1);
   assert.equal(run.id, 1);
 });
 
 test('the count starts over after an update; one runs at a time; the events keep counting meanwhile', () => {
   const { router } = make();
-  router.note('a', ['zone', 'zone']);
+  router.note('a', ['zone']);
   assert.ok(router.begin());
   router.note('a', ['sub', 'sub', 'sub']);
   assert.equal(router.blocked(), 'running');
@@ -36,34 +35,34 @@ test('the count starts over after an update; one runs at a time; the events keep
   assert.equal(router.begin(), null);
 });
 
-test('each character is counted on its own', () => {
+test('each character is counted on its own, and both get their update', () => {
   const { router } = make();
   router.note('a', ['zone']);
   router.note('b', ['zone']);
-  assert.equal(router.begin(), null);
-  router.note('b', ['sub']);
   assert.equal(router.begin().key, 'b');
+  router.end();
+  assert.equal(router.begin().key, 'a');
 });
 
 test('updates keep a minimum distance and an hourly limit', () => {
   const t = make({ minSeconds: 45, maxPerHour: 2 });
-  t.router.note('a', ['zone', 'zone']);
+  t.router.note('a', ['zone']);
   assert.ok(t.router.begin());
   t.router.end();
-  t.router.note('a', ['zone', 'zone']);
+  t.router.note('a', ['zone']);
   assert.equal(t.router.blocked(), 'too soon');
   t.advance(46);
   assert.ok(t.router.begin());
   t.router.end();
-  t.router.note('a', ['zone', 'zone']);
+  t.router.note('a', ['zone']);
   t.advance(46);
   assert.equal(t.router.blocked(), 'hourly limit');
   t.advance(3600);
   assert.ok(t.router.begin());
 });
 
-test('defaults: every 2 events, on; it can be turned off', () => {
-  assert.deepEqual([DEFAULTS.enabled, DEFAULTS.everyEvents], [true, 2]);
+test('defaults: every event, 60 an hour, on; it can be turned off', () => {
+  assert.deepEqual([DEFAULTS.enabled, DEFAULTS.everyEvents, DEFAULTS.maxPerHour], [true, 1, 60]);
   const off = make({ enabled: false });
   assert.equal(off.router.note('a', ['zone', 'zone']), 0);
   assert.equal(off.router.begin(), null);

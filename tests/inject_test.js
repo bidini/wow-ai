@@ -24,6 +24,7 @@ cfg.inboxFile = path.join(S, 'addons', 'WoWAI', 'Inbox.lua');
 cfg.savedVariablesFile = path.join(S, 'nope.lua');
 cfg.defaultCwd = path.join(S, 'proj');
 cfg.slots = 5;
+cfg.router = { enabled: false };   // no agent runs of its own here
 fs.writeFileSync(path.join(S, 'config.json'), JSON.stringify(cfg, null, 2));
 
 console.log(execFileSync(process.execPath, ['install-slots.js'], { cwd: S, encoding: 'utf8' }).trim());

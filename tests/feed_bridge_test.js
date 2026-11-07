@@ -32,6 +32,7 @@ function sandbox(feedCfg) {
   cfg.savedVariablesFile = path.join(S, 'nope.lua');
   cfg.defaultCwd = path.join(S, 'proj');
   if (feedCfg) cfg.feed = feedCfg;
+  cfg.router = { enabled: false };   // no agent runs of its own here
   fs.writeFileSync(path.join(S, 'config.json'), JSON.stringify(cfg, null, 2));
   return S;
 }
