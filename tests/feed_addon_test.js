@@ -900,3 +900,117 @@ test('completed quests: a client without the call sends no Z lines and raises no
   assert.deepEqual(linesStarting(batches, 'Z'), []);
   assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
 });
+
+// ---------------------------------------------------------------------------
+// Flight points, the bind location and the hearthstone
+// ---------------------------------------------------------------------------
+
+const FLIGHT_STUB = `
+STUB.taxi = {
+  { nodeID = 11, name = "The Sepulcher, Silverpine Forest", position = { x = 0.4262, y = 0.2184 }, state = 1 },
+  { nodeID = 12, name = "Tarren Mill, Hillsbrad Foothills", position = { x = 0.4713, y = 0.3441 }, state = 2 },
+  { nodeID = 13, name = "Undercity, Tirisfal", position = { x = 0.4471, y = 0.2557 }, state = 0 },
+}
+Enum = Enum or {}
+Enum.FlightPathState = { Current = 0, Reachable = 1, Unreachable = 2 }
+C_TaxiMap = { GetTaxiNodesForMap = function(map) if map == 1415 then return STUB.taxi end return {} end }
+STUB.bind = "Brill"
+function GetBindLocation() return STUB.bind end
+STUB.hearthStart, STUB.hearthDuration = 0, 0
+function GetItemCooldown(id) if id == 6948 then return STUB.hearthStart, STUB.hearthDuration, 1 end end
+function GetItemCount(id) if id == 6948 then return 1 end return 0 end
+`;
+function flightVM(extra) {
+  const vm = newVM();
+  vm.run(`C_Map.GetBestMapForUnit = function() return STUB.playerMap or 1458 end
+    C_Map.GetMapInfo = function(id) local t = { [1458] = { name = "Undercity", mapType = 5, parentMapID = 1420 }, [1420] = { name = "Tirisfal", mapType = 3, parentMapID = 1415 }, [1415] = { name = "Eastern Kingdoms", mapType = 2, parentMapID = 947 } }; local m = t[id]; if m then return { name = m.name, mapType = m.mapType, parentMapID = m.parentMapID, mapID = id } end end
+    Enum = Enum or {}; Enum.UIMapType = { Continent = 2, Zone = 3 }`);
+  vm.run(FLIGHT_STUB);
+  if (extra) vm.run(extra);
+  login(vm); connect(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  return vm;
+}
+// What the bridge reads out of the T lines: the nodes, and where they came from.
+function flightPoints(batches) {
+  const chunks = linesStarting(batches, 'T').map(l => l.split('\t'));
+  if (!chunks.length) return null;
+  const n = Number(chunks[0][3]);
+  assert.equal(chunks.length, n);
+  const nodes = [];
+  for (const c of chunks.sort((a, b) => Number(a[2]) - Number(b[2]))) {
+    for (const tok of c.slice(5)) {
+      const m = /^(\d+):(\d):(\d+):(\d+):(\d+):(.*)$/.exec(tok);
+      nodes.push({ id: +m[1], known: m[2] === '1', map: +m[3], x: +m[4] / 10, y: +m[5] / 10, name: m[6] });
+    }
+  }
+  return { src: chunks[0][4], nodes };
+}
+
+test('flight points: the nodes the client lists for the continent go out with their place and name', () => {
+  const vm = flightVM();
+  const fp = flightPoints(collect(vm, 70));
+  assert.equal(fp.src, 'forMap');
+  assert.deepEqual(fp.nodes.map(n => [n.id, n.known, n.map, n.x, n.y, n.name]), [
+    [11, true, 1415, 42.6, 21.8, 'The Sepulcher, Silverpine Forest'],
+    [12, true, 1415, 47.1, 34.4, 'Tarren Mill, Hillsbrad Foothills'],
+    [13, true, 1415, 44.7, 25.6, 'Undercity, Tirisfal'],
+  ], 'every node the call lists is a known one');
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('flight points: only changes are sent again, and visiting a flight master reads them again', () => {
+  const vm = flightVM();
+  collect(vm, 70);
+  assert.equal(flightPoints(collect(vm, 40)), null, 'quiet');
+  vm.run('table.insert(STUB.taxi, { nodeID = 14, name = "Hammerfall, Arathi Highlands", position = { x = 0.5, y = 0.4 }, state = 2 }); STUB.FireEvent("TAXIMAP_OPENED")');
+  const fp = flightPoints(collect(vm, 40));
+  assert.equal(fp.nodes.length, 4);
+});
+
+test('flight points: a client without the call says so, with no nodes and no error', () => {
+  const vm = flightVM('C_TaxiMap = nil');
+  const fp = flightPoints(collect(vm, 70));
+  assert.equal(fp.src, 'none');
+  assert.deepEqual(fp.nodes, []);
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('flight points: when only GetAllTaxiNodes exists, unreachable nodes are not counted as known', () => {
+  const vm = flightVM('local f = C_TaxiMap.GetTaxiNodesForMap; C_TaxiMap = { GetAllTaxiNodes = f }');
+  const fp = flightPoints(collect(vm, 70));
+  assert.equal(fp.src, 'all');
+  assert.deepEqual(fp.nodes.map(n => [n.id, n.known]), [[11, true], [12, false], [13, true]]);
+});
+
+test('hearthstone: the bind place, when it is ready again, and that you carry one', () => {
+  const vm = flightVM('STUB.hearthStart = GetTime() - 600; STUB.hearthDuration = 3600');
+  const b = linesStarting(collect(vm, 70), 'B');
+  assert.equal(b.length, 1);
+  const f = b[0].split('\t');
+  assert.equal(f[1], 'Brill');
+  const ready = Number(f[2]) - vm.num('time()');
+  assert.ok(ready > 2900 && ready < 3100, `ready in ${ready} s`);
+  assert.equal(f[3], '1');
+  assert.equal(f[4], '', 'the first read does not know where the bind was made');
+});
+
+test('hearthstone: ready now is 0; using it sends the new time; binding somewhere else sends where', () => {
+  const vm = flightVM();
+  const first = linesStarting(collect(vm, 70), 'B');
+  assert.equal(first[0].split('\t')[2], '0');
+  vm.run('STUB.hearthStart = GetTime(); STUB.hearthDuration = 3600; STUB.FireEvent("BAG_UPDATE_COOLDOWN")');
+  const second = linesStarting(collect(vm, 40), 'B');
+  assert.equal(second.length, 1);
+  assert.ok(Number(second[0].split('\t')[2]) > vm.num('time()') + 3500);
+  vm.run('STUB.bind = "The Sepulcher"; STUB.posX, STUB.posY = 0.43, 0.41; STUB.FireEvent("PLAYER_ENTERING_WORLD", false, false)');
+  const third = linesStarting(collect(vm, 40), 'B')[0].split('\t');
+  assert.equal(third[1], 'The Sepulcher');
+  assert.ok(third[4] !== '' && third[5] !== '' && third[6] !== '', 'a changed bind carries the spot where it was made');
+});
+
+test('hearthstone: a client without the calls sends no B line and raises no error', () => {
+  const vm = ready({ settle: false });
+  assert.deepEqual(linesStarting(collect(vm, 70), 'B'), []);
+  assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});

@@ -266,3 +266,35 @@ test('a set whose chunks arrive across batches in any order is complete only whe
   t.feed.ingest(job(zPayload(zLine(9, 2, 3, [20, 21])), 3));
   assert.deepEqual(t.feed.state.character.completed, [10, 11, 20, 21, 30, 31]);
 });
+
+// ---- flight points (T lines) and the hearthstone (B line) ----------------------------------------------------
+const tLine = (gen, i, n, src, nodes) => ['T', gen, i, n, src, ...nodes.map(x => `${x.id}:${x.k}:${x.m}:${x.x}:${x.y}:${x.name}`)].join('\t');
+
+test('parsePayload reads flight points and the bind line', () => {
+  const p = F.parsePayload(zPayload(
+    tLine(3, 1, 1, 'forMap', [{ id: 11, k: 1, m: 1415, x: 426, y: 218, name: 'The Sepulcher, Silverpine Forest' }, { id: 12, k: 0, m: 1415, x: 471, y: 344, name: 'Tarren Mill: Hillsbrad' }]),
+    'B\tBrill\t1700003600\t1\t1420\t612\t508'));
+  assert.deepEqual(p.hero.flightChunks, [{ gen: 3, i: 1, n: 1, src: 'forMap', nodes: [
+    { id: 11, known: true, map: 1415, x: 42.6, y: 21.8, name: 'The Sepulcher, Silverpine Forest' },
+    { id: 12, known: false, map: 1415, x: 47.1, y: 34.4, name: 'Tarren Mill: Hillsbrad' }] }]);
+  assert.deepEqual(p.hero.hearth, { bind: 'Brill', readyAt: 1700003600, has: 1, pos: { map: 1420, x: 61.2, y: 50.8 } });
+  assert.deepEqual(F.parsePayload(zPayload('B\tBrill\t0\t0\t\t\t')).hero.hearth, { bind: 'Brill', readyAt: 0, has: 0, pos: null });
+  assert.equal(F.parsePayload(zPayload('T\t1\t1\t1\tx\tbad token')).hero.flightChunks[0].nodes.length, 0);
+});
+
+test('flight points are kept as a set, replaced by a newer one, and the hearthstone is stored with its ready time in ms', () => {
+  const t = setup();
+  t.feed.ingest(job(zPayload('H\tUndead\tPaladin\tHorde', tLine(3, 1, 2, 'forMap', [{ id: 11, k: 1, m: 1415, x: 426, y: 218, name: 'Sepulcher' }])), 1));
+  assert.deepEqual(t.feed.state.character.flightPoints, [], 'half a set is not used');
+  t.feed.ingest(job(zPayload(tLine(3, 2, 2, 'forMap', [{ id: 13, k: 1, m: 1415, x: 447, y: 256, name: 'Undercity' }]), 'B\tBrill\t1700003600\t1\t\t\t'), 2));
+  assert.deepEqual(t.feed.state.character.flightPoints.map(n => n.id), [11, 13]);
+  assert.equal(t.feed.state.character.flightSrc, 'forMap');
+  assert.deepEqual(t.feed.state.character.hearth, { bind: 'Brill', readyAt: 1700003600000, has: 1, pos: null });
+  assert.match(t.feed.summary(), /2 flight points known/);
+  assert.match(t.feed.summary(), /Hearthstone: bound to Brill/);
+  t.feed.ingest(job(zPayload(tLine(4, 1, 1, 'forMap', [{ id: 13, k: 1, m: 1415, x: 447, y: 256, name: 'Undercity' }])), 3));
+  assert.deepEqual(t.feed.state.character.flightPoints.map(n => n.id), [13]);
+  const snap = JSON.parse(fs.readFileSync(path.join(t.state, 'snapshot.json'), 'utf8'));
+  assert.equal(snap.character.hearth.bind, 'Brill');
+  assert.equal(F.createFeed({ dir: t.state, store: {} }).state.character.flightPoints.length, 1);
+});

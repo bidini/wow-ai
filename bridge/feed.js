@@ -128,6 +128,31 @@ function parsePayload(text) {
         (out.hero.doneChunks = out.hero.doneChunks || []).push({ gen, i, n, ids });
         break;
       }
+      case 'T': {
+        // T gen i n src id:k:map:x:y:name ...: chunk i of n of the flight points of the continent; k is 1 for a node the
+        // player knows; x and y are tenths of a percent of the continent map. src names the call that answered.
+        const gen = int(f[1]), i = int(f[2]), n = int(f[3]);
+        if (gen === null || i === null || n === null || n < 1 || n > MAX_CHUNKS || i < 1 || i > n) { out.unknown++; break; }
+        const nodes = [];
+        for (const tok of f.slice(5, 5 + 12)) {
+          const m = /^(\d{1,7}):([01]):(\d{1,6}):(\d{1,4}):(\d{1,4}):(.*)$/.exec(tok);
+          const name = m ? clean(m[6], 40) : '';
+          if (name) nodes.push({ id: Number(m[1]), known: m[2] === '1', map: Number(m[3]), x: Number(m[4]) / 10, y: Number(m[5]) / 10, name });
+        }
+        out.hero = out.hero || {};
+        (out.hero.flightChunks = out.hero.flightChunks || []).push({ gen, i, n, src: clean(f[4], 10), nodes });
+        break;
+      }
+      case 'B': {
+        // B bind readyAt has [map x y]: where the hearthstone is bound, when it can be used again (epoch seconds, 0 = now),
+        // whether the character carries one, and the spot where it was bound when the addon saw it happen.
+        const bind = clean(f[1], 40);
+        if (!bind) { out.unknown++; break; }
+        const m = int(f[4]), x = percent(f[5]), y = percent(f[6]);
+        out.hero = out.hero || {};
+        out.hero.hearth = { bind, readyAt: Math.max(0, int(f[2]) || 0), has: int(f[3]) > 0 ? 1 : 0, pos: m && x !== null && y !== null ? { map: m, x, y } : null };
+        break;
+      }
       case 'K': case 'W': {
         // Atlas lines (docs/DISTANCE.md). The key exists only when a batch carries some.
         const a = parseAtlasLine(f, clean);
@@ -229,7 +254,7 @@ function dayText(d) {
 
 function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), maxFileBytes = 2000000, transportFile = '', dailyLog = true, atlas: sharedAtlas = null }) {
   const atlas = sharedAtlas || createAtlas({ dir, transportFile, clean, log });
-  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, professions: [], skills: [], skillsSeen: false, spells: [], spellsGen: 0, completed: [], completedGen: 0 }, spellAsm: null, doneAsm: null, quests: { active: [], ready: [], names: {} }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
+  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, professions: [], skills: [], skillsSeen: false, spells: [], spellsGen: 0, completed: [], completedGen: 0, flightPoints: [], flightGen: 0, flightSrc: '', hearth: null }, spellAsm: null, doneAsm: null, flightAsm: null, quests: { active: [], ready: [], names: {} }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
 
   const file = name => path.join(dir, name);
   function ensureDir() { fs.mkdirSync(dir, { recursive: true, mode: 0o755 }); }
@@ -310,6 +335,23 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
         for (let i = 1; i <= asm.n; i++) all.push(...asm.parts[i]);
         c.completed = [...new Set(all)].sort((a, b) => a - b); c.completedGen = asm.gen; mem.doneAsm = null; ch.completed = true;
       }
+    }
+    for (const chunk of h.flightChunks || []) {
+      if (chunk.gen < (c.flightGen || 0)) continue;                // an older set arriving late
+      let asm = mem.flightAsm;
+      if (asm && chunk.gen < asm.gen) continue;
+      if (!asm || chunk.gen > asm.gen) asm = mem.flightAsm = { gen: chunk.gen, n: chunk.n, parts: {}, src: chunk.src };
+      if (chunk.n !== asm.n) continue;
+      asm.parts[chunk.i] = chunk.nodes;
+      if (Object.keys(asm.parts).length === asm.n) {
+        const all = [];
+        for (let i = 1; i <= asm.n; i++) all.push(...asm.parts[i]);
+        c.flightPoints = all; c.flightGen = asm.gen; c.flightSrc = asm.src; mem.flightAsm = null; ch.flights = true;
+      }
+    }
+    if (h.hearth) {
+      if (JSON.stringify(c.hearth) !== JSON.stringify({ ...h.hearth, readyAt: h.hearth.readyAt * 1000 })) ch.hearth = true;
+      c.hearth = { ...h.hearth, readyAt: h.hearth.readyAt * 1000 };
     }
     return ch;
   }
@@ -507,6 +549,8 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
       bits.push(`${Object.keys(ch.equipped || {}).length} items equipped`);
       if ((ch.spells || []).length) bits.push(`${ch.spells.length} spells`);
       if ((ch.completed || []).length) bits.push(`${ch.completed.length} quests completed`);
+      const known = (ch.flightPoints || []).filter(n => n.known);
+      if (known.length) bits.push(`${known.length} flight points known`);
       if (ch.skillsSeen) {
         const profs = ch.professions || [];
         const show = list => list.map(k => `${k.name} ${k.rank}/${k.max}`).join(', ');
@@ -516,6 +560,8 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
         if (n) bits.push(`${n} other skill${n === 1 ? '' : 's'}`);
       }
       lines.push(`Character: ${bits.join(', ')}.`);
+      const hs = ch.hearth;
+      if (hs) lines.push(`Hearthstone: ${hs.has ? `bound to ${hs.bind}, ${hs.readyAt > at ? `ready in ${Math.ceil((hs.readyAt - at) / 60000)} min` : 'ready now'}` : `none in the bags (bound to ${hs.bind})`}.`);
     }
     const qs = mem.quests;
     if (qs && (qs.active.length || qs.ready.length)) {

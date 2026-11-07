@@ -18,6 +18,8 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Added
 
+- The flight points you know (`T` lines), where the hearthstone is bound and when it is ready again (`B` line) are reported and kept in `snapshot.json` under `character.flightPoints` and `character.hearth`; the summary shows both.
+
 - The quests you have handed in (`Z` lines) are reported to the bridge and kept in `snapshot.json` under `character.completed`; the summary shows how many.
 
 - The reminders no longer speak about quests, routes, trainers or vendors, and are at most two lines.

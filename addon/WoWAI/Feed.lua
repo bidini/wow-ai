@@ -52,6 +52,9 @@ local INFO_HEAD_BYTES = 900 -- character lines only fill what the other head lin
 local SPELLS_PER_CHUNK = 12
 local DONE_PER_CHUNK = 80     -- completed quest numbers per Z line (sorted, each as the step from the one before, in base 36)
 local MAX_DONE = 4000
+local FLIGHT_PER_CHUNK = 8    -- flight points per T line
+local MAX_FLIGHT = 120
+local HEARTHSTONE = 6948
 local CHUNKS_PER_BATCH = 2
 local MAX_SPELLS = 360
 local MAX_SKILLS = 24
@@ -61,7 +64,7 @@ local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
 local US = "\31"
 
 local F = {
-	pending = {}, samples = {}, turned = {}, qNamed = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {}, infoSent = {}, infoPending = {}, spellQueue = {}, doneQueue = {},
+	pending = {}, samples = {}, turned = {}, qNamed = {}, atlasQueue = {}, atlasSent = {}, atlasKnown = {}, infoSent = {}, infoPending = {}, spellQueue = {}, doneQueue = {}, flightQueue = {},
 	stats = { built = 0, sent = 0, dropped = 0, errors = 0 },
 }
 
@@ -456,6 +459,65 @@ local function ReadCompleted()
 	return out
 end
 
+-- The continent map a map lies on (the flight points of a continent are listed on its map).
+local function ContinentMap(mapID)
+	local continent = (Enum and Enum.UIMapType and Enum.UIMapType.Continent) or 2
+	for _ = 1, 8 do
+		local info = Try(C_Map and C_Map.GetMapInfo, mapID)
+		if type(info) ~= "table" then return nil end
+		if info.mapType == continent then return mapID end
+		mapID = info.parentMapID
+		if type(mapID) ~= "number" or mapID == 0 then return nil end
+	end
+end
+
+-- The flight points of the continent the player is on: { src, nodes = { { id, k (1 = known), m, x, y, name } } }.
+-- src says which call answered ("forMap", "all") or "none" when the client has neither; nil when the continent is not known.
+-- GetTaxiNodesForMap lists the nodes the player has discovered; GetAllTaxiNodes also lists the others, told apart by state.
+local function ReadFlightPoints()
+	local TM = C_TaxiMap
+	local src, get
+	if type(TM) == "table" and type(TM.GetTaxiNodesForMap) == "function" then src, get = "forMap", TM.GetTaxiNodesForMap
+	elseif type(TM) == "table" and type(TM.GetAllTaxiNodes) == "function" then src, get = "all", TM.GetAllTaxiNodes end
+	if not get then return { src = "none", nodes = {} } end
+	local here = Try(C_Map and C_Map.GetBestMapForUnit, "player")
+	local cont = type(here) == "number" and ContinentMap(here) or nil
+	if not cont then return nil end
+	local list = Try(get, cont)
+	local nodes = {}
+	if type(list) == "table" then
+		for _, n in ipairs(list) do
+			local p = type(n) == "table" and n.position
+			if type(n.nodeID) == "number" and type(p) == "table" and type(p.x) == "number" and type(p.y) == "number" and #nodes < MAX_FLIGHT then
+				local known = true
+				if src == "all" then known = n.state == 0 or n.state == 1 end -- Enum.FlightPathState: Current, Reachable
+				nodes[#nodes + 1] = { id = n.nodeID, k = known and 1 or 0, m = cont, x = Tenths(p.x), y = Tenths(p.y), name = Clean(n.name, 40) }
+			end
+		end
+	end
+	return { src = src, nodes = nodes }
+end
+
+-- The hearthstone as the "B" line: where it is bound, when it can be used again (epoch seconds, 0 = now), whether the
+-- character carries one, and (only when the bind changed while playing) the spot where it was bound.
+local function ReadHearth()
+	local bind = Try(GetBindLocation)
+	if type(bind) ~= "string" or bind == "" then return nil end
+	local cd = (C_Container and C_Container.GetItemCooldown) or GetItemCooldown
+	local start, dur
+	if type(cd) == "function" then start, dur = Try(cd, HEARTHSTONE) end
+	local readyAt = 0
+	if type(start) == "number" and type(dur) == "number" and start > 0 and dur > 0 then
+		local left = start + dur - GetTime()
+		if left > 1 then readyAt = math.floor((Now() + left) / 5 + 0.5) * 5 end
+	end
+	local count = Try((C_Item and C_Item.GetItemCount) or GetItemCount, HEARTHSTONE)
+	local m, x, y
+	if F.bindSeen and F.bindSeen ~= bind then m, x, y = Pos() end
+	F.bindSeen = bind
+	return table.concat({ "B", Clean(bind, 40), readyAt, (type(count) == "number" and count > 0) and 1 or 0, m or "", x and Tenths(x) or "", y and Tenths(y) or "" }, "\t")
+end
+
 local DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
 local function Base36(n)
 	if n == 0 then return "0" end
@@ -474,7 +536,7 @@ local function CheckInfo()
 	local function Put(key, line)
 		if line and sent[key] ~= line then sent[key] = line; F.infoPending[key] = line end
 	end
-	Put("H", ReadHero()); Put("I", ReadGear()); Put("R", ReadSkills())
+	Put("H", ReadHero()); Put("I", ReadGear()); Put("R", ReadSkills()); Put("B", ReadHearth())
 	local spells = ReadSpells()
 	if spells then
 		local sig = table.concat(spells, "\t")
@@ -508,7 +570,24 @@ local function CheckInfo()
 			end
 		end
 	end
-	if next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 then ArmFlush() end
+	local fp = ReadFlightPoints()
+	if fp then
+		local toks = {}
+		for _, n in ipairs(fp.nodes) do toks[#toks + 1] = n.id .. ":" .. n.k .. ":" .. n.m .. ":" .. n.x .. ":" .. n.y .. ":" .. n.name end
+		local sig = fp.src .. "|" .. table.concat(toks, "\t")
+		if sent.T ~= sig then
+			sent.T = sig
+			F.flightGen = math.max(Now(), (F.flightGen or 0) + 1)
+			F.flightQueue = {}
+			local n = math.max(1, math.ceil(#toks / FLIGHT_PER_CHUNK))
+			for i = 1, n do
+				local part = {}
+				for k = (i - 1) * FLIGHT_PER_CHUNK + 1, math.min(i * FLIGHT_PER_CHUNK, #toks) do part[#part + 1] = toks[k] end
+				F.flightQueue[#F.flightQueue + 1] = "T\t" .. F.flightGen .. "\t" .. i .. "\t" .. n .. "\t" .. fp.src .. (#part > 0 and ("\t" .. table.concat(part, "\t")) or "")
+			end
+		end
+	end
+	if next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 or #F.flightQueue > 0 then ArmFlush() end
 end
 
 ---------------------------------------------------------------------------
@@ -574,7 +653,7 @@ local function Build()
 			headSize = headSize + #line + 1
 			return true
 		end
-		for _, key in ipairs({ "H", "I", "R" }) do
+		for _, key in ipairs({ "H", "I", "R", "B" }) do
 			local line = F.infoPending[key]
 			if line and Take(line) then F.infoPending[key] = nil end
 		end
@@ -584,8 +663,11 @@ local function Build()
 		for _ = 1, CHUNKS_PER_BATCH do
 			if #F.doneQueue > 0 and Take(F.doneQueue[1]) then table.remove(F.doneQueue, 1) end
 		end
+		for _ = 1, CHUNKS_PER_BATCH do
+			if #F.flightQueue > 0 and Take(F.flightQueue[1]) then table.remove(F.flightQueue, 1) end
+		end
 		for _, l in ipairs(DrainAtlas(headSize)) do head[#head + 1] = l end
-		if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 then ArmFlush() end
+		if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 or #F.flightQueue > 0 then ArmFlush() end
 	end
 	local ev, sm = F.pending, F.samples
 	local function size()
@@ -614,7 +696,7 @@ local function Build()
 	local wire = table.concat({ Wire(db.session), "", tostring(db.feedSeq), "", "e", "", payload }, US)
 	F.out = { seq = db.feedSeq, wire = wire, shows = 0, nextAt = now, createdAt = now, bytes = #payload }
 	F.pending, F.samples, F.flushAt = {}, {}, nil
-	if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 then F.flushAt = now + DEBOUNCE end
+	if #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 or #F.flightQueue > 0 then F.flushAt = now + DEBOUNCE end
 	F.lastBuild = now
 	F.stats.built = F.stats.built + 1
 end
@@ -662,7 +744,7 @@ function M.Tick()
 	if not F.out then
 		if now - (F.lastBuild or now) >= HEARTBEAT and #F.pending == 0 then Event("tick") end
 		local due = (F.flushAt and now >= F.flushAt) or #F.samples >= FLUSH_SAMPLES
-		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0) then Build() end
+		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 or #F.flightQueue > 0) then Build() end
 	end
 	o = F.out
 	if o and not o.showing and o.shows < Shows() and now >= o.nextAt and WoWAI.IsConnected() then
@@ -708,7 +790,8 @@ function M.OnEvent(event, a1, a2)
 	elseif event == "PLAYER_LEVEL_UP" then
 		Event("level", a1 or Try(UnitLevel, "player") or "")
 		F.infoAt = F.infoAt or (GetTime() + INFO_DEBOUNCE)
-	elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "SKILL_LINES_CHANGED" then
+	elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "SKILL_LINES_CHANGED"
+		or event == "TAXIMAP_OPENED" or event == "BAG_UPDATE_COOLDOWN" or event == "HEARTHSTONE_BOUND" then
 		F.infoAt = F.infoAt or (GetTime() + INFO_DEBOUNCE)
 	elseif event == "PLAYER_DEAD" then
 		F.dead = true
@@ -734,7 +817,7 @@ end
 local GAME_EVENTS = {
 	"PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS",
 	"PLAYER_LEVEL_UP", "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST", "QUEST_LOG_UPDATE", "QUEST_TURNED_IN",
-	"PLAYER_EQUIPMENT_CHANGED", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "SKILL_LINES_CHANGED",
+	"PLAYER_EQUIPMENT_CHANGED", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "SKILL_LINES_CHANGED", "TAXIMAP_OPENED", "BAG_UPDATE_COOLDOWN", "HEARTHSTONE_BOUND",
 }
 
 local frame = CreateFrame("Frame")
@@ -755,7 +838,7 @@ function M.Status()
 		enabled = Enabled(), built = F.stats.built, sent = F.stats.sent, dropped = F.stats.dropped, errors = F.stats.errors,
 		pending = #F.pending, samples = #F.samples, seq = WoWAIDB and WoWAIDB.feedSeq or 0, lastError = F.lastError,
 		hold = Hold(), shows = Shows(), showing = F.out ~= nil and F.out.showing or false, waiting = F.out ~= nil,
-		atlasQueued = #F.atlasQueue, infoQueued = #F.spellQueue + #F.doneQueue + (next(F.infoPending) and 1 or 0),
+		atlasQueued = #F.atlasQueue, infoQueued = #F.spellQueue + #F.doneQueue + #F.flightQueue + (next(F.infoPending) and 1 or 0),
 	}
 end
 
