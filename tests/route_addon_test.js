@@ -272,3 +272,41 @@ test('a route without coordinates shows no arrow and raises no error', () => {
   vm.load('WoWAIRoute.UpdateArrow()');
   assert.equal(vm.evaluate('WoWAIRouteArrow'), null);
 });
+
+// ---- travel steps: a flight, the hearthstone and a zeppelin are steps of their own ---------------------------------------------------------
+const TRAVEL_STEPS = [
+  { k: 'accept', q: 100, t: 'Accept: A (Giver)', z: 'Silverpine Forest 50.0, 50.0', w: 'walk 10 yd' },
+  { k: 'fly', t: 'Fly: The Sepulcher to Undercity', z: 'Silverpine Forest 45.6, 42.6', w: 'walk 26 yd' },
+  { k: 'turnin', q: 100, t: 'Turn in: A (Giver)', z: 'Undercity 62.0, 50.0', w: '-' },
+  { k: 'hearth', t: 'Use the hearthstone: back to The Sepulcher', z: 'The Sepulcher', w: 'about 15 s cast' },
+  { k: 'accept', q: 200, t: 'Accept: B (Giver)', z: 'Silverpine Forest 43.4, 41.1', w: '-' },
+];
+
+test('a flight or hearthstone step is its own line in its own colour and the current step says how', () => {
+  const vm = routeVM(TRAVEL_STEPS, 'STUB.log[100] = { ready = true }');
+  assert.equal(vm.evaluate('WoWAIRoute.State().current'), '2', 'the quest is ready, so the flight is next');
+  vm.load('WoWAIRoute.Refresh()');
+  const raw = vm.evaluate('WoWAIRouteList.rows[2].text');
+  assert.match(raw, /Fly: The Sepulcher to Undercity/);
+  const r = rows(vm);
+  assert.match(r.join('\n'), /> 2\. Fly: The Sepulcher to Undercity/);
+  vm.load('STUB.log[100] = nil; STUB.done[100] = true'); refresh(vm);
+  assert.equal(vm.evaluate('WoWAIRoute.State().current'), '4', 'the flight is over once the turn-in is');
+  const color = vm.evaluate('WoWAIRouteList.rows[2].text'); // rows: 3 (turn-in, done), 4 (hearthstone, current: gold)
+  assert.match(color, /ffd100.*Use the hearthstone/);
+});
+
+test('a travel step that is not current has its own colour', () => {
+  const vm = routeVM(TRAVEL_STEPS);
+  vm.load('STUB.log[100] = nil; WoWAIRoute.Refresh()');
+  const all = vm.evaluate('(function() local t = {} for _, r in ipairs(WoWAIRouteList.rows) do if r.shown then t[#t + 1] = r.text end end return table.concat(t, "\\n") end)()');
+  assert.match(all, /4fd1ff3\. Turn in|ffffff3\. Turn in/, 'a quest step keeps the plain colour');
+  assert.match(all, /4fd1ff2\. Fly/, 'a flight not yet reached is cyan');
+});
+
+test('travel steps without a position raise no error and show no arrow', () => {
+  const vm = routeVM(TRAVEL_STEPS, 'STUB.done[100] = true');
+  assert.equal(vm.evaluate('WoWAIRoute.State().current'), '4');
+  vm.load('WoWAIRoute.UpdateArrow()');
+  assert.equal(vm.evaluate('WoWAIRouteArrow == nil or not WoWAIRouteArrow:IsShown()'), 'true');
+});

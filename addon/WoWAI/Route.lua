@@ -1,7 +1,8 @@
 -- WoWAI route: the step list. A leveling route written by the planner (RouteData.lua) is listed on the left of the screen with the
 -- current step marked and where to go, and steps are ticked off from the game's own quest state: a quest in the log means its accept
--- step is done, a ready quest means its kill / collect steps are done, a quest handed in means the rest. Steps with no quest (a flight
--- point, an inn) are ticked by hand. No agent and no arrow; it only reads and draws. Nothing here acts for the player.
+-- step is done, a ready quest means its kill / collect steps are done, a quest handed in means the rest. Steps with no quest (a flight, the
+-- hearthstone, a zeppelin, a flight point, an inn) are shown in their own colour and are over once a later quest step is, or ticked by hand.
+-- It only reads and draws. Nothing here acts for the player.
 
 local M = {}
 WoWAIRoute = M
@@ -12,6 +13,7 @@ local MARGIN_MAC = 96 -- the Dock covers the left edge of a Mac screen (the same
 local localDB = { skips = {} }
 local list, data, arrow
 local ARROW = "Interface\\Minimap\\MinimapArrow"
+local TRAVEL = { fly = true, hearth = true, zeppelin = true, discover = true, bind = true } -- steps the game cannot confirm: shown in their own colour
 
 local function Try(f, ...)
 	if type(f) ~= "function" then return nil end
@@ -57,7 +59,16 @@ function M.State()
 	for i, s in ipairs(steps) do
 		local d = StepDone(s)
 		state.done[i] = d
-		if not d and not found then state.current = i; found = true end
+	end
+	-- A step with no quest of its own (a flight, the hearthstone, a zeppelin, a flight point, an inn) cannot be read from the game, but it is
+	-- over once a later quest step is: the player is already past it. Those before the last finished quest step are ticked.
+	local last = 0
+	for i, s in ipairs(steps) do
+		if s.q and StepDone({ i = 0, k = s.k, q = s.q }) then last = i end
+	end
+	for i, s in ipairs(steps) do
+		if not s.q and i < last then state.done[i] = true end
+		if not state.done[i] and not found then state.current = i; found = true end
 	end
 	if not found then state.current = #steps + 1 end
 	return state
@@ -126,7 +137,8 @@ function M.Refresh()
 	local lines = {}
 	for i = math.max(1, cur - 1), #steps do
 		local s = steps[i]
-		local color = state.done[i] and "ff808080" or (i == cur and "ffffd100" or "ffffffff")
+		local travel = TRAVEL[s.k]
+		local color = state.done[i] and "ff808080" or (i == cur and "ffffd100" or (travel and "ff4fd1ff" or "ffffffff"))
 		lines[#lines + 1] = { text = string.format("%s|c%s%d. %s|r", i == cur and "> " or "   ", color, i, s.t), step = i }
 		if i == cur then
 			lines[#lines + 1] = { text = string.format("      |cff9aa0a6%s  |  %s|r", s.z or "", s.w or ""), step = i }

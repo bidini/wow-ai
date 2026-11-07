@@ -25,7 +25,7 @@ Twelve lines at most, starting from the step before the current one. Drag the fr
 - **Accept** is done once the quest is in your log (or already handed in).
 - **Kill, collect, use** are done once the quest is ready (or handed in).
 - **Turn in** is done once the quest is handed in.
-- A step with no quest (finding a flight point, setting the hearthstone) is ticked by hand: right-click it (or the arrow), or `/wow-ai route skip`.
+- A step with no quest (a flight, the hearthstone, a zeppelin, finding a flight point, setting the hearthstone) is shown in cyan until it is the current step. The game cannot confirm it, so it is ticked automatically once a later quest step is done, or by hand: right-click it (or the arrow), or `/wow-ai route skip`. Steps with no position (the hearthstone) show no arrow.
 - A quest finished out of order ticks all its steps. The current step is always the first one not done.
 
 ## Commands

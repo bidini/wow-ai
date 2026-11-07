@@ -4,6 +4,10 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Route list: a flight, a hearthstone use, a zeppelin ride, finding a flight point and setting the hearthstone are steps of their own, in their own colour. They are ticked automatically once a later quest step is done (or by hand).
+
 ### Removed
 
 - The navigator arrow (and `/wow-ai map nav`, `next`, `prev`, `stop`, and clicking a pin to navigate). Map pins and lines stay.
