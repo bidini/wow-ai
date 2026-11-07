@@ -413,19 +413,15 @@ function validateMapCommand(c, why = []) {
   for (const p of c.points.slice(0, MAP_LIMITS.pointsPerLayer)) {
     const m = Number(p && p.m), x = Number(p && p.x), y = Number(p && p.y);
     if (!Number.isInteger(m) || m <= 0 || m > 99999 || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const point = {
+    points.push({
       m, x: Math.round(Math.min(100, Math.max(0, x)) * 100) / 100, y: Math.round(Math.min(100, Math.max(0, y)) * 100) / 100,
       label: cleanText(p.label, MAP_LIMITS.label), kind: MAP_KINDS.has(p.kind) ? p.kind : 'poi',
-    };
-    // Stops of the router's route also carry an id and the quest they belong to (the game does not need them).
-    if (typeof p.id === 'string' && /^[A-Za-z0-9]{1,8}$/.test(p.id)) point.id = p.id;
-    if (Number.isInteger(p.q) && p.q > 0 && p.q <= 9999999) point.q = p.q;
-    points.push(point);
+    });
   }
   if (c.points.length > MAP_LIMITS.pointsPerLayer) why.push(`layer ${layer}: kept the first ${MAP_LIMITS.pointsPerLayer} points`);
   if (points.length < c.points.slice(0, MAP_LIMITS.pointsPerLayer).length) why.push(`layer ${layer}: dropped invalid points`);
   if (!points.length) { why.push(`layer ${layer}: no valid points`); return null; }
-  return { op: 'set', layer, title: cleanText(c.title || layer, MAP_LIMITS.title), ordered: !!c.ordered, loop: !!c.loop, quiet: !!c.quiet, points };
+  return { op: 'set', layer, title: cleanText(c.title || layer, MAP_LIMITS.title), ordered: !!c.ordered, loop: !!c.loop, points };
 }
 
 function newMap(epoch) {
@@ -447,7 +443,7 @@ function applyMapCommands(map, cmds, now = Date.now()) {
     } else if (c.op === 'clear') {
       if (map.layers[c.layer]) { delete map.layers[c.layer]; changed = true; notes.push(`cleared layer ${c.layer}`); }
     } else {
-      map.layers[c.layer] = { title: c.title, ordered: c.ordered, loop: c.loop, quiet: c.quiet, points: c.points, t: now };
+      map.layers[c.layer] = { title: c.title, ordered: c.ordered, loop: c.loop, points: c.points, t: now };
       changed = true;
       notes.push(`layer ${c.layer}: ${c.points.length} point(s)`);
     }
@@ -497,7 +493,7 @@ function parseMapFile(src) {
 function luaMap(map) {
   const lines = ['\tmap = {', `\t\tepoch = ${luaStr(map.epoch)},`, `\t\tversion = ${Number(map.version) || 0},`, '\t\tlayers = {'];
   for (const [name, l] of Object.entries(map.layers || {})) {
-    lines.push(`\t\t\t{ name = ${luaStr(name)}, title = ${luaStr(l.title)}, ordered = ${l.ordered ? 'true' : 'false'}, loop = ${l.loop ? 'true' : 'false'}${l.quiet ? ', quiet = true' : ''}, points = {`);
+    lines.push(`\t\t\t{ name = ${luaStr(name)}, title = ${luaStr(l.title)}, ordered = ${l.ordered ? 'true' : 'false'}, loop = ${l.loop ? 'true' : 'false'}, points = {`);
     for (const p of l.points) lines.push(`\t\t\t\t{ ${p.m}, ${p.x}, ${p.y}, ${luaStr(p.label)}, ${luaStr(p.kind)} },`);
     lines.push('\t\t\t} },');
   }

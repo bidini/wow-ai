@@ -16,10 +16,6 @@ The agent can mark your world map. What it draws are **layers**: a named list of
 2. When the run ends the bridge validates the commands (`protocol.js`: sanitized labels, coordinates clamped to 0-100, at most 400 points per layer, 1500 in total, 12 layers with the oldest dropped first), applies them to the layers it keeps in `state.json`, and bumps a version number. The reply gets a `[bridge] map: ...` line saying what changed.
 3. The next slot files carry the whole set (`map = { epoch, version, layers }`) for three minutes after a change (on progress publishes only while the set is small), and again after every hello. The addon replaces its copy when the version is newer (or the bridge's state was reset). A mark can't be applied twice, and a client that lost its saved data gets the layers back when it says hello.
 
-The route layer also shows as a step list on the left of the screen (`/wow-ai map list on|off`, [ROUTER.md](ROUTER.md)).
-
-A layer can be **quiet** (`"quiet":true` in the command): the addon draws it without printing anything in the chat. The router ([ROUTER.md](ROUTER.md)) keeps the `route` layer up to date that way.
-
 ## In game
 
 - **World map:** pins for every visible layer on the map you are looking at, projected onto continent maps too. Hover for the label; click a pin to navigate to it.

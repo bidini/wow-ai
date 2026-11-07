@@ -33,7 +33,7 @@ process.stdin.on('end', () => {
 
 function sandbox(reminderCfg) {
   const S = fs.mkdtempSync(path.join(os.tmpdir(), 'reminder-bridge-'));
-  for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js', 'code.js', 'lint.js', 'reminder.js', 'router.js', 'install-slots.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
+  for (const f of ['bridge.js', 'protocol.js', 'agents.js', 'feed.js', 'atlas.js', 'code.js', 'lint.js', 'reminder.js', 'install-slots.js']) fs.copyFileSync(path.join(SRC, f), path.join(S, f));
   fs.mkdirSync(path.join(S, 'addons', 'WoWAI'), { recursive: true });
   fs.writeFileSync(path.join(S, 'addons', 'WoWAI', 'WoWAI.toc'), '## Interface: 16001\n');
   fs.mkdirSync(path.join(S, 'proj'), { recursive: true });
@@ -46,7 +46,6 @@ function sandbox(reminderCfg) {
   cfg.slots = 3;
   cfg.agents.claude.path = path.join(S, 'fake-claude');
   cfg.reminder = reminderCfg === undefined ? { minSeconds: 0 } : reminderCfg;
-  cfg.router = { enabled: false };   // the route updates are tested in router_bridge_test.js
   fs.writeFileSync(path.join(S, 'config.json'), JSON.stringify(cfg, null, 2));
   const r = spawnSync(process.execPath, ['install-slots.js'], { cwd: S, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
@@ -165,4 +164,15 @@ test('a state file from when this was called the coach is carried over', () => {
   assert.equal(state.reminderSig, 4);
   assert.ok(signal(S, 4) > 0);
   for (const k of [1, 2, 3]) assert.ok(signal(S, k) > 0, `signal ${k} is valid too: the game finds the newest by assuming the valid files are 1..n with no gap`);
+});
+
+test('what the removed router left in a state file is dropped, other map layers stay', () => {
+  const S = sandbox();
+  const pt = { m: 1420, x: 1, y: 2, label: 'a', kind: 'quest' };
+  fs.writeFileSync(path.join(S, 'state.json'), JSON.stringify({ router: { counter: 4 }, map: { epoch: 'e', version: 3, layers: { route: { title: 'Route', ordered: true, points: [pt], t: 1 }, mining: { title: 'Copper', points: [pt], t: 2 } } } }));
+  inject(S, batch(THREE), 5);
+  const state = JSON.parse(fs.readFileSync(path.join(S, 'state.json'), 'utf8'));
+  assert.deepEqual(Object.keys(state.map.layers), ['mining']);
+  assert.equal(state.map.version, 4, 'a new version, so the game replaces its copy');
+  assert.equal(state.router, undefined);
 });

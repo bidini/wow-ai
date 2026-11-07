@@ -33,7 +33,6 @@ const A = require('./agents');   // how each agent is launched and read, unit-te
 const Code = require('./code');  // agent-proposed addon code: checked, put in a slot for the player to load (docs/CODE.md)
 const Lint = require('./lint');
 const Reminder = require('./reminder'); // when to ask the agent for a tip, and what counts as one (docs/REMINDER.md)
-const Router = require('./router');     // when to ask the agent for a route, and what is taken from the answer (docs/ROUTER.md)
 const Feed = require('./feed');  // the event feed: files and a prompt summary built from what the addon reports (docs/EVENTS.md)
 
 const HERE = __dirname;
@@ -149,13 +148,6 @@ if (!state.reminder) state.reminder = state.coach || {};   // 'coach' was the fi
 if (state.reminderSig === undefined && state.coachSig) state.reminderSig = state.coachSig;
 const reminder = feed ? Reminder.createReminder(cfg.reminder || {}, { store: state.reminder }) : null;
 const REMINDER_JOB_BASE = 2000000000;   // never an addon message id
-
-// The router (docs/ROUTER.md): every game event the bridge asks the agent, on its own, for the
-// next route; it is drawn as the "route" layer of the map and nothing is written to the chat.
-// "router": { "enabled": false } turns it off.
-if (!state.router) state.router = {};
-const router = feed ? Router.createRouter(cfg.router || {}, { store: state.router }) : null;
-const ROUTER_JOB_BASE = 1900000000;     // never an addon message id, nor a reminder's
 
 // Bridge-side transcripts. The beta client sometimes wipes addon saved data; since
 // every prompt and reply passes through here, this copy lets the addon recover.
@@ -279,6 +271,9 @@ function killTree(child) {
 // truth; slot files carry the whole set while the game may not have it yet: for a
 // while after it changes, and after every hello (a fresh or wiped client).
 if (!state.map) state.map = P.newMap();
+// The router (removed) kept its route in a "route" layer: drop what it left, and the game forgets it on its next hello.
+if (state.map.layers.route) P.applyMapCommands(state.map, [{ op: 'clear', layer: 'route' }]);
+delete state.router;
 const MAP_DIR = path.join(HERE, 'mapjobs');
 // Every publish rewrites all slot files, so the map rides along only for a short
 // while, and on progress publishes only while it is small.
@@ -488,8 +483,6 @@ function submit(job) {
       if (!r.dup) {
         saveState();
         if (reminder && reminder.note(r.key, r.types)) maybeReminder();
-        if (router) pruneRoute(r);
-        if (router && router.note(r.key, r.types)) maybeRoute();
       }
     } catch (e) { log(`feed: could not store #${job.id}: ${e.message}`); }
     return;
@@ -539,15 +532,12 @@ function drainQueue() {
   }
 }
 
-// A run the bridge starts on its own (a reminder check, a route update): silent, no chat, no session kept.
-const automatic = job => !!(job.reminder || job.router);
-
 function runJob(job) {
   const key = chatKey(job);
   const cwd = resolveCwd(job.cwd);
   job.cwd = cwd;
   const tag = `#${job.id}${job.session ? '@' + job.session : ''}`;
-  if (!automatic(job)) {
+  if (!job.reminder) {
     signal('sig', job.id, false);
     resetBeats(job.id);
     signal('ack', job.id, true);
@@ -596,7 +586,7 @@ function runJob(job) {
     const added = allowRules(agentId, job.allow);
     log(`${tag} allowed for ${agentId}: ${job.allow.join(', ')}${added.length ? '' : ' (already allowed)'}`);
   }
-  if (!automatic(job)) {
+  if (!job.reminder) {
     maybeOfferRestore(job);
     noteMessage(job, 'user', job.text);
   }
@@ -604,9 +594,8 @@ function runJob(job) {
 
   const ctx = gameContext();
   const liveFeed = feed ? feed.block() : '';
-  const own = job.router ? Router.systemPrompt(liveFeed, job.routerRun.mode) : job.reminder ? Reminder.systemPrompt(liveFeed) : '';
-  const system = own || P.systemPrompt(ctx, primer(), liveFeed, CODE_HINT);
-  const systemShort = own || P.systemPrompt(ctx, '', liveFeed, CODE_HINT);
+  const system = job.reminder ? Reminder.systemPrompt(liveFeed) : P.systemPrompt(ctx, primer(), liveFeed, CODE_HINT);
+  const systemShort = job.reminder ? system : P.systemPrompt(ctx, '', liveFeed, CODE_HINT);
   const promptFile = path.join(TMP_DIR, `prompt-${job.id}-${Date.now().toString(36)}.txt`);
   const input = agent.input({ prompt: job.text, system, systemShort, resume, cfg: acfg });
   if (input.promptFile !== undefined) {
@@ -619,7 +608,7 @@ function runJob(job) {
   })];
   const env = agent.env({ ...process.env });
   // Where this run's tools append map commands (docs/MAP.md); any agent can use it.
-  if (!automatic(job)) {
+  if (!job.reminder) {
     try {
       fs.mkdirSync(MAP_DIR, { recursive: true });
       fs.rmSync(mapFileFor(job), { force: true });
@@ -630,7 +619,7 @@ function runJob(job) {
   log(`${tag} (${job.via}) ${agent.name} starting in ${cwd}${resume ? ' (resume ' + resume.slice(0, 8) + ')' : ' (new session)'}${ctx ? ' [game context]' : ''}${running.size ? ' [' + (running.size + 1) + ' running]' : ''}`);
   const child = spawn(cmd.file, args, { cwd, env, windowsHide: true, stdio: [input.stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
   running.set(key, { job, child });
-  if (!automatic(job)) publish(key, { chat: job.chat, id: job.id, status: 'working', text: resume ? 'thinking...' : 'starting a new session...', cwd, session: resume, agent: agentId }, true);
+  if (!job.reminder) publish(key, { chat: job.chat, id: job.id, status: 'working', text: resume ? 'thinking...' : 'starting a new session...', cwd, session: resume, agent: agentId }, true);
   if (input.stdin !== undefined) { child.stdin.on('error', () => {}); child.stdin.end(input.stdin); }
 
   const parser = agent.parser();
@@ -647,7 +636,7 @@ function runJob(job) {
   const pushProgress = (line) => {
     progress.push(line);
     while (progress.length > 10) progress.shift();
-    if (automatic(job)) return;   // a check or an update runs silently; only a tip or a route shows
+    if (job.reminder) return;   // a check runs silently; only its tip is shown
     beat(job);
     publish(key, { chat: job.chat, id: job.id, status: 'working', text: progress.join('\n'), cwd, session: sessionId, agent: agentId }, false);
   };
@@ -726,13 +715,13 @@ function runJob(job) {
       }
     }
     if (buffer.trim()) handleLine(buffer.trim());
-    if (sessionId && !automatic(job)) {
+    if (sessionId && !job.reminder) {
       state.sessions[skey] = sessionId;
       (state.sessionCwd = state.sessionCwd || {})[skey] = cwd;
       (state.sessionAgent = state.sessionAgent || {})[skey] = agentId;
     }
     // Map marks count whatever the outcome: the tools already reported them.
-    const mapped = job.router ? { text: result ? result.text : '', note: '' } : takeMapCommands(job, result ? result.text : '');   // the router's route is taken in finishRoute
+    const mapped = takeMapCommands(job, result ? result.text : '');
     if (result) result.text = mapped.text;
     if (mapped.note) notes.push(mapped.note);
     const extra = notes.length ? `\n\n[bridge] ${notes.join('\n\n[bridge] ')}` : '';
@@ -751,7 +740,6 @@ function finish(job, status, text, session, denied) {
   if (job.finished) return; // spawn failures fire both 'error' and 'close'
   job.finished = true;
   if (job.reminder) { finishReminder(job, status, text); return; }
-  if (job.router) { finishRoute(job, status, text); return; }
   running.delete(chatKey(job));
   markHandled(job);
   saveState();
@@ -846,77 +834,6 @@ function finishReminder(job, status, text) {
 }
 
 // ---------------------------------------------------------------------------
-// The router
-// ---------------------------------------------------------------------------
-
-const routeLayer = () => state.map.layers[Router.ROUTE_LAYER];
-const routePoints = () => (routeLayer() || {}).points || [];
-// What decides whether a route changed: the stops, not the ids the bridge numbered them with.
-const stopKey = p => [p.m, p.x, p.y, p.label, p.kind, p.q || 0].join('|');
-const sameStops = (a, b) => a.length === b.length && a.every((p, i) => stopKey(p) === stopKey(b[i]));
-
-// Makes `points` the route (no points: no route), and tells the game with a record that holds no text; the
-// reminder signal makes the game look. Returns the stops now on the map.
-function setRoute(points) {
-  const valid = points.length ? P.validateMapCommand({ op: 'set', layer: Router.ROUTE_LAYER, title: 'Route', ordered: true, quiet: true, points }) : null;
-  P.applyMapCommands(state.map, [valid || { op: 'clear', layer: Router.ROUTE_LAYER }]);
-  state.router.published = (state.router.published || 0) + 1;
-  saveState();
-  mapShareUntil = Date.now() + MAP_SHARE_MS;
-  publish('route:update', { chat: 'route', id: state.router.published, status: 'done', text: '', route: true, at: Date.now(), cwd: '', session: '', agent: '' }, true);
-  reminderBeat();
-  saveState();
-  return valid ? valid.points : [];
-}
-
-// Stops the batch finished (a quest handed in, a trainer reached) leave the route at once.
-function pruneRoute(r) {
-  const plan = routePoints();
-  if (!plan.length) return;
-  const { points, removed } = Router.prune(plan, r.evs, r.here);
-  if (!removed) return;
-  const now = setRoute(points);
-  log(`route: ${removed} finished stop(s) removed, ${now.length} left`);
-}
-
-// Starts an update when events have come in and nothing blocks it; same cadence rules as maybeReminder.
-function maybeRoute() {
-  if (!router || router.blocked() || running.size >= MAX_PARALLEL) return;
-  const run = router.begin(Date.now(), routePoints());
-  if (!run) return;
-  log(`route #${run.id}: ${run.events} new event(s), asking the agent (${run.mode})`);
-  runJob({ id: ROUTER_JOB_BASE + run.id, chat: 'route', session: 'route', text: run.prompt, cwd: '', newSession: true, via: 'route', router: true, routerRun: run, timeoutMs: run.mode === 'build' ? router.config.buildTimeoutMs : router.config.timeoutMs, agent: '' });
-}
-
-function finishRoute(job, status, text) {
-  const run = job.routerRun;
-  running.delete(chatKey(job));
-  router.end();
-  const at = Date.now();
-  if (status === 'done') {
-    const plan = routePoints();
-    const update = Router.routeUpdate(text);
-    const next = update ? router.apply(plan, update) : null;
-    const valid = next && next.length ? P.validateMapCommand({ op: 'set', layer: Router.ROUTE_LAYER, title: 'Route', ordered: true, quiet: true, points: next }) : null;
-    if (!valid) {
-      log(`route #${run.id}: ${run.mode === 'build' ? 'no route in the reply, keeping the old one' : 'no change'}`);
-    } else {
-      if (feed) feed.logLine(run.key, 'route.jsonl', at, { t: at, id: run.id, mode: run.mode, events: run.events, stops: valid.points.length, route: valid.points.map(p => p.label) });
-      if (sameStops(valid.points, plan)) {
-        log(`route #${run.id}: route unchanged`);
-      } else {
-        const now = setRoute(valid.points);
-        log(`route #${run.id}: ${now.length} stop(s): ${now.slice(0, 3).map(p => p.label).join(' > ').slice(0, 160)}`);
-      }
-    }
-  } else {
-    log(`route #${run.id}: update failed: ${String(text).split('\n')[0].slice(0, 160)}`);
-  }
-  drainQueue();
-  if (exitWhenIdle && running.size === 0) process.exit(status === 'done' ? 0 : 1);
-}
-
-// ---------------------------------------------------------------------------
 // Input loops
 // ---------------------------------------------------------------------------
 
@@ -999,8 +916,7 @@ function banner() {
   const ctx = gameContext();
   console.log(`  context  : ${cfg.gameContext === false ? 'off (gameContext in config.json)' : ctx ? (ctx.split('\n').find(l => /^Character:/i.test(l)) || ctx.split('\n')[0]).slice(0, 100) : 'none yet (the addon sends it with its hello; /wow-ai context in game)'}`);
   console.log(`  feed     : ${feed ? FEED_DIR + (feed.state.lastRx ? ' (last update ' + Feed.ago(Date.now() - feed.state.lastRx) + ' ago)' : ' (nothing received yet)') : 'off (feed.enabled in config.json)'}`);
-  console.log(`  reminder : ${reminder ? (reminder.config.enabled ? 'on: a check every ' + reminder.config.everyEvents + ' events (at most one a ' + reminder.config.minSeconds + ' s and ' + reminder.config.maxPerHour + ' an hour)' : 'off (reminder.enabled in config.json)') : 'off (needs the feed)'}`);
-  console.log(`  route    : ${router ? (router.config.enabled ? 'on: a route update every ' + router.config.everyEvents + ' events (at most one a ' + router.config.minSeconds + ' s and ' + router.config.maxPerHour + ' an hour)' : 'off (router.enabled in config.json)') : 'off (needs the feed)'}`);
+  console.log(`  reminder    : ${reminder ? (reminder.config.enabled ? 'on: a check every ' + reminder.config.everyEvents + ' events (at most one a ' + reminder.config.minSeconds + ' s and ' + reminder.config.maxPerHour + ' an hour)' : 'off (reminder.enabled in config.json)') : 'off (needs the feed)'}`);
   console.log(`  code     : ${codePool ? 'on, ' + CODE_CFG.slots + ' slots (the player loads each piece by hand; audit trail in ' + path.join(FEED_DIR, 'code') + ')' : 'off (code.enabled in config.json)'}`);
   console.log(`  primer   : ${!PRIMER_FILE ? 'off (primerFile in config.json)' : primer() ? path.resolve(REPO, PRIMER_FILE) + ' (' + primer().length + ' chars, with the context)' : 'NOT FOUND: ' + path.resolve(REPO, PRIMER_FILE)}`);
   console.log('Leave this window open while you play. Ctrl+C to stop.\n');
@@ -1024,7 +940,6 @@ if (injectFeed !== null) {
     presenceBeat();
     setInterval(presenceBeat, cfg.presenceIntervalMs || 30000);
     setInterval(maybeReminder, 15000);
-    setInterval(maybeRoute, 15000);
     if (cap.enabled) startCapture();
   }
 }

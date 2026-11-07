@@ -394,7 +394,6 @@ local function BuildNavigator()
 end
 
 function M.UpdateNavigator()
-	M.UpdateList()
 	local l, p, i = NavPoint()
 	if not l then if nav then nav:Hide() end return end
 	if not nav then BuildNavigator() end
@@ -435,7 +434,7 @@ function M.Step(delta, arrived)
 	local nexti = i + delta
 	if nexti > #l.points then
 		if l.loop then nexti = 1 else
-			if not l.quiet then Print("route finished: " .. l.title) end
+			Print("route finished: " .. l.title)
 			mdb.nav = nil
 			M.UpdateNavigator()
 			M.Refresh()
@@ -446,7 +445,6 @@ function M.Step(delta, arrived)
 	end
 	mdb.nav.index = nexti
 	M.Refresh()
-	M.UpdateList()
 	if not arrived then M.UpdateNavigator() end
 end
 
@@ -454,76 +452,6 @@ function M.Stop()
 	DB().nav = nil
 	M.UpdateNavigator()
 	M.Refresh()
-end
-
----------------------------------------------------------------------------
--- Step list: the stops of the route being followed, on the left of the screen
----------------------------------------------------------------------------
-
-local LIST_ROWS = 12
-local LIST_WIDTH = 280
-local LIST_MARGIN_MAC = 96 -- the Dock covers the left edge of a Mac screen (the same margin as the pixel strip)
-local KIND_COLOR = { turnin = "ffd100", quest = "66ccff", kill = "ff8080", loot = "ff8080", object = "ff8080", explore = "ff8080", trainer = "a0ff80", vendor = "ffa040", flight = "c0a0ff" }
-local list, listKey
-
-local function BuildList()
-	list = CreateFrame("Frame", "WoWAIRouteList", UIParent, "BackdropTemplate")
-	list:SetSize(LIST_WIDTH, 26 + LIST_ROWS * 14)
-	list:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-	list:SetBackdropColor(0, 0, 0, 0.6)
-	local p = DB().listPos
-	if p then list:SetPoint(p[1], UIParent, p[1], p[2], p[3])
-	else list:SetPoint("TOPLEFT", UIParent, "TOPLEFT", (IsMacClient and IsMacClient()) and LIST_MARGIN_MAC or 12, -150) end
-	list:SetMovable(true)
-	list:EnableMouse(true)
-	list:RegisterForDrag("LeftButton")
-	list:SetScript("OnDragStart", list.StartMoving)
-	list:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		local point, _, _, x, y = self:GetPoint()
-		DB().listPos = { point, x, y }
-	end)
-	list.title = list:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	list.title:SetPoint("TOPLEFT", 10, -8)
-	list.title:SetJustifyH("LEFT")
-	list.rows = {}
-	for r = 1, LIST_ROWS do
-		local row = list:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		row:SetPoint("TOPLEFT", 10, -10 - r * 14)
-		row:SetWidth(LIST_WIDTH - 20)
-		row:SetJustifyH("LEFT")
-		row:SetWordWrap(false)
-		list.rows[r] = row
-	end
-	list:Hide()
-end
-
--- Shows the route being followed with its current stop marked, or hides the list.
-function M.UpdateList()
-	local l, _, i = NavPoint()
-	if not l or (DB().list and DB().list.off) then
-		if list then list:Hide() end
-		return
-	end
-	if not list then BuildList() end
-	list:Show()
-	local n = #l.points
-	local key = table.concat({ l.name, i, n, mdb.map and mdb.map.version or 0 }, ":")
-	if key == listKey then return end
-	listKey = key
-	list.title:SetText(string.format("%s %d/%d", l.title or l.name, i, n))
-	local first = math.max(1, math.min(i - 1, n - LIST_ROWS + 1))
-	for r = 1, LIST_ROWS do
-		local k, row = first + r - 1, list.rows[r]
-		local p = l.points[k]
-		if p then
-			local label = (p[4] ~= "" and p[4]) or l.title
-			row:SetText(string.format("%s|cff%s%d. %s|r", k == i and "> " or "   ", KIND_COLOR[p[5]] or "ffffff", k, label))
-			row:Show()
-		else
-			row:Hide()
-		end
-	end
 end
 
 ---------------------------------------------------------------------------
@@ -554,8 +482,7 @@ function M.Sync(m)
 	if mdb.nav and not FindLayer(mdb.nav.layer) then mdb.nav = nil end
 	for _, l in ipairs(changed) do
 		mdb.hidden[l.name] = nil
-		-- A quiet layer (the route the bridge keeps up to date on its own) only appears on the map.
-		if not l.quiet then Print(string.format("%s: %d point(s)%s. Open the map (M) to see it.", l.title or l.name, #l.points, l.ordered and ", route" or "")) end
+		Print(string.format("%s: %d point(s)%s. Open the map (M) to see it.", l.title or l.name, #l.points, l.ordered and ", route" or ""))
 		-- A new or changed route on the player's continent starts navigation at its first
 		-- stop, unless the player is already following another route.
 		local here = PlayerOnContinent()
@@ -580,7 +507,7 @@ local function Status()
 	end
 	local n = mdb.nodes
 	Print(string.format("nodes: ore %s, herb %s, filter %s%s", n.ore and "on" or "off", n.herb and "on" or "off", n.filter, WoWAINodes and "" or "  (WoWAI_Nodes data addon not installed)"))
-	Print("commands: /wow-ai map ore|herb [on|off], filter all|skill, list [on|off] (the step list on the left), show|hide <layer>, nav <layer> [n], next, prev, stop  (/aimap is the same)")
+	Print("commands: /wow-ai map ore|herb [on|off], filter all|skill, show|hide <layer>, nav <layer> [n], next, prev, stop  (/aimap is the same)")
 end
 
 function M.Command(msg)
@@ -607,12 +534,6 @@ function M.Command(msg)
 	elseif cmd == "next" then M.Step(1)
 	elseif cmd == "prev" then M.Step(-1)
 	elseif cmd == "stop" then M.Stop()
-	elseif cmd == "list" and (rest == "on" or rest == "off") then
-		mdb.list = mdb.list or {}
-		mdb.list.off = (rest == "off") or nil
-		listKey = nil
-		M.UpdateList()
-		Print("step list " .. rest)
 	else Status() end
 end
 
