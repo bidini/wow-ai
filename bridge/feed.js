@@ -130,12 +130,12 @@ function parsePayload(text) {
       }
       case 'T': {
         // T gen i n src id:state:map:x:y:name ...: chunk i of n of the flight points of the continent (both factions); state is
-        // 0 current, 1 reachable, 2 unreachable, 9 none; x and y are tenths of a percent of the continent map. src names the call that answered.
+        // 0 current, 1 reachable, 2 unreachable, 3 distant, 9 none; only 0 and 1 are nodes the player can fly to; x and y are tenths of a percent of the continent map. src names the call that answered.
         const gen = int(f[1]), i = int(f[2]), n = int(f[3]);
         if (gen === null || i === null || n === null || n < 1 || n > MAX_CHUNKS || i < 1 || i > n) { out.unknown++; break; }
         const nodes = [];
         for (const tok of f.slice(5, 5 + 12)) {
-          const m = /^(\d{1,7}):([0-29]):(\d{1,6}):(\d{1,4}):(\d{1,4}):(.*)$/.exec(tok);
+          const m = /^(\d{1,7}):([0-39]):(\d{1,6}):(\d{1,4}):(\d{1,4}):(.*)$/.exec(tok);
           const name = m ? clean(m[6], 40) : '';
           if (name) nodes.push({ id: Number(m[1]), state: Number(m[2]), known: m[2] === '0' || m[2] === '1', map: Number(m[3]), x: Number(m[4]) / 10, y: Number(m[5]) / 10, name });
         }
@@ -254,7 +254,7 @@ function dayText(d) {
 
 function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), maxFileBytes = 2000000, transportFile = '', dailyLog = true, atlas: sharedAtlas = null }) {
   const atlas = sharedAtlas || createAtlas({ dir, transportFile, clean, log });
-  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, professions: [], skills: [], skillsSeen: false, spells: [], spellsGen: 0, completed: [], completedGen: 0, flightPoints: [], flightKnown: [], flightGen: 0, flightSrc: '', hearth: null }, spellAsm: null, doneAsm: null, flightAsm: null, quests: { active: [], ready: [], names: {} }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
+  const mem = { snapshot: null, character: { race: '', class: '', faction: '', gold: null, equipped: {}, professions: [], skills: [], skillsSeen: false, spells: [], spellsGen: 0, completed: [], completedGen: 0, flightPoints: [], flightKnown: [], flightKnownV: 2, flightGen: 0, flightSrc: '', hearth: null }, spellAsm: null, doneAsm: null, flightAsm: null, quests: { active: [], ready: [], names: {} }, events: [], points: [], zones: [], lastRx: 0, batches: 0, gaps: 0, session: '' };
 
   const file = name => path.join(dir, name);
   function ensureDir() { fs.mkdirSync(dir, { recursive: true, mode: 0o755 }); }
@@ -276,6 +276,8 @@ function createFeed({ dir, store = {}, log = () => {}, now = () => Date.now(), m
     mem.snapshot = s.now || null;
     if (s.character && typeof s.character === 'object') mem.character = { ...mem.character, ...s.character };
     mem.quests = s.quests || mem.quests;
+    // The first version counted distant nodes as found: what it stored is not trusted.
+    if (s.character && s.character.flightKnownV !== 2) { mem.character.flightKnown = []; mem.character.flightKnownV = 2; }
     if (!mem.quests.names) mem.quests.names = {};
     mem.lastRx = s.rx || 0;
     mem.session = s.session || '';

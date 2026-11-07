@@ -301,3 +301,19 @@ test('flight points are kept as a set, replaced by a newer one, and the hearthst
   assert.equal(snap.character.hearth.bind, 'Brill');
   assert.equal(F.createFeed({ dir: t.state, store: {} }).state.character.flightPoints.length, 2);
 });
+
+test('a distant flight point is listed but not known; known points the bridge stored before this rule are forgotten', () => {
+  const p = F.parsePayload(zPayload(tLine(3, 1, 1, 'forMap', [{ id: 19, s: 3, m: 1415, x: 440, y: 935, name: 'Booty Bay' }, { id: 10, s: 1, m: 1415, x: 411, y: 298, name: 'Sepulcher' }])));
+  assert.deepEqual(p.hero.flightChunks[0].nodes.map(n => [n.id, n.state, n.known]), [[19, 3, false], [10, 1, true]]);
+  const t = setup();
+  t.feed.ingest(job(zPayload('H\tUndead\tPaladin\tHorde', tLine(3, 1, 1, 'forMap', [{ id: 10, s: 1, m: 1415, x: 411, y: 298, name: 'Sepulcher' }])), 1));
+  const file = path.join(t.state, 'snapshot.json');
+  const snap = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(snap.character.flightKnownV, 2);
+  snap.character.flightKnown = [10, 19, 67, 74]; delete snap.character.flightKnownV;       // what an older bridge wrote
+  fs.writeFileSync(file, JSON.stringify(snap));
+  assert.deepEqual(F.createFeed({ dir: t.state, store: {} }).state.character.flightKnown, [], 'forgotten');
+  snap.character.flightKnownV = 2;
+  fs.writeFileSync(file, JSON.stringify(snap));
+  assert.deepEqual(F.createFeed({ dir: t.state, store: {} }).state.character.flightKnown, [10, 19, 67, 74], 'kept once it carries the version');
+});

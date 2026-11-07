@@ -478,11 +478,11 @@ end
 -- The nodes of both factions are listed, discovered or not, and told apart by state.
 -- While a flight master's window is open the client says which nodes can be flown to: through GetAllTaxiNodes (state per node
 -- number) or the old calls (a type per slot, matched by name). What it said is kept, so the nodes found stay known after the window closes.
-local TAXI_TYPE_STATE = { CURRENT = 0, REACHABLE = 1, DISTANT = 1, NONE = 2 }
+local TAXI_TYPE_STATE = { CURRENT = 0, REACHABLE = 1, NONE = 2, DISTANT = 3 }   -- only 0 and 1 are nodes the player can fly to
 local function CaptureTaxi()
 	local here = Try(C_Map and C_Map.GetBestMapForUnit, "player")
 	local cont = type(here) == "number" and ContinentMap(here) or nil
-	F.taxiById, F.taxiByName = F.taxiById or {}, F.taxiByName or {}
+	F.taxiById, F.taxiByName, F.taxiByPos = F.taxiById or {}, F.taxiByName or {}, F.taxiByPos or {}
 	if cont and type(C_TaxiMap) == "table" and type(C_TaxiMap.GetAllTaxiNodes) == "function" then
 		local list = Try(C_TaxiMap.GetAllTaxiNodes, cont)
 		if type(list) == "table" then
@@ -495,7 +495,12 @@ local function CaptureTaxi()
 	if type(count) == "number" and type(TaxiNodeGetType) == "function" and type(TaxiNodeName) == "function" then
 		for i = 1, math.min(count, 200) do
 			local name, kind = Try(TaxiNodeName, i), Try(TaxiNodeGetType, i)
-			if type(name) == "string" and TAXI_TYPE_STATE[kind] then F.taxiByName[name] = TAXI_TYPE_STATE[kind] end
+			local state = TAXI_TYPE_STATE[kind]
+			if type(name) == "string" and state then
+				-- Two nodes can share a name (one per faction); where they are tells them apart.
+				local x, y = Try(TaxiNodePosition, i)
+				if type(x) == "number" and type(y) == "number" then F.taxiByPos[Tenths(x) .. ":" .. Tenths(y)] = state else F.taxiByName[name] = state end
+			end
 		end
 	end
 end
@@ -526,7 +531,7 @@ local function ReadFlightPoints()
 		for _, n in ipairs(list) do
 			local p = type(n) == "table" and n.position
 			if type(n.nodeID) == "number" and type(p) == "table" and type(p.x) == "number" and type(p.y) == "number" and #nodes < MAX_FLIGHT then
-				local s = (n.state == 0 or n.state == 1 or n.state == 2) and n.state or (F.taxiById and F.taxiById[n.nodeID]) or (F.taxiByName and F.taxiByName[n.name]) or 9
+				local s = (n.state == 0 or n.state == 1 or n.state == 2) and n.state or (F.taxiById and F.taxiById[n.nodeID]) or (F.taxiByPos and F.taxiByPos[Tenths(p.x) .. ":" .. Tenths(p.y)]) or (F.taxiByName and F.taxiByName[n.name]) or 9
 				nodes[#nodes + 1] = { id = n.nodeID, s = s, m = cont, x = Tenths(p.x), y = Tenths(p.y), name = Clean(n.name, 40) }
 			end
 		end

@@ -1060,3 +1060,21 @@ test('flight points: a client with many taxi calls and long node names still get
   assert.ok(fp.note.length <= 110, `the note is short (${fp.note.length})`);
   for (const b of batches) assert.ok(b.text.length <= 1250, `batch of ${b.text.length}`);
 });
+
+test('flight points: a distant node is not a found one, and same-named nodes are told apart by where they are', () => {
+  const vm = flightVM(`
+    STUB.taxi = {
+      { nodeID = 18, name = "Booty Bay, Stranglethorn", position = { x = 0.4400, y = 0.9340 } },
+      { nodeID = 19, name = "Booty Bay, Stranglethorn", position = { x = 0.4411, y = 0.9352 } },
+      { nodeID = 11, name = "Undercity, Tirisfal", position = { x = 0.4471, y = 0.2557 } },
+      { nodeID = 10, name = "The Sepulcher, Silverpine Forest", position = { x = 0.4110, y = 0.2980 } },
+    }
+    STUB.types = { "REACHABLE", "DISTANT", "CURRENT", "NONE" }
+    function NumTaxiNodes() return 4 end
+    function TaxiNodeName(i) return STUB.taxi[i].name end
+    function TaxiNodeGetType(i) return STUB.types[i] end
+    function TaxiNodePosition(i) return STUB.taxi[i].position.x, STUB.taxi[i].position.y end`);
+  collect(vm, 70);
+  vm.run('STUB.FireEvent("TAXIMAP_OPENED")');
+  assert.deepEqual(flightPoints(collect(vm, 40)).nodes.map(n => [n.id, n.state]), [[18, 1], [19, 3], [11, 0], [10, 2]], 'reachable 1, distant 3, none 2; the two Booty Bays are not confused');
+});
