@@ -18,6 +18,8 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Added
 
+- Route step list: a leveling route written by the planner (`RouteData.lua`) is listed on the left of the screen with the current step and where to go, and steps are ticked off from your quest log; `/wow-ai route`. Needs one full game relaunch. See [docs/ROUTE.md](docs/ROUTE.md).
+
 - The map atlas now covers every continent of the world, not only the one you are on, so routes can include zones you have not visited.
 
 - The flight points you know (`T` lines), where the hearthstone is bound and when it is ready again (`B` line) are reported and kept in `snapshot.json` under `character.flightPoints` (with each node's state), `character.flightKnown` and `character.hearth`; the summary shows both.

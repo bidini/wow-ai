@@ -2876,6 +2876,7 @@ local HELP = table.concat({
 	"/wow-ai reset                  next message in this chat starts a fresh agent session",
 	"/wow-ai context [on|off]       what the agent is told about your character and where you are (no argument = show it)",
 	"/wow-ai reminder [clear|window <number|name|default>]   the tips the reminder gave while you played (the bridge asks the agent every few events; window = the chat tab they are written to; no argument = list)",
+	"/wow-ai route [skip [n]|undo <n>|reset|on|off]   the leveling route step list on the left of the screen: the current step and where to go (no argument = status); right-click a step to tick it",
 	"/wow-ai shop [<number>|clear]   what your agent suggested buying; at the auction house a click types the item name into the search box (no argument = list)",
 	"/wow-ai code [load <slot>|stop <name|all>|on|off]   run addon code the agent offered and the bridge accepted; nothing runs until you load it, and never at login (no argument = status)",
 	"/wow-ai feed [on|off|atlas|info|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
@@ -2924,6 +2925,7 @@ local COMMAND_ARGS = {
 	cd = true, new = true, rename = true,
 	feed = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest == "atlas" or rest == "info" or rest:match("^hold %d+%.?%d*$") ~= nil or rest:match("^shows %d$") ~= nil end,
 	reminder = function(rest) return rest == "" or rest == "clear" or rest:match("^window") ~= nil end, -- Reminder.lua
+	route = true, -- Route.lua
 	shop = function(rest) return rest == "" or rest == "clear" or rest:match("^%d+$") ~= nil end, -- Shop.lua
 	code = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest:match("^load %d+$") ~= nil or rest:match("^stop [%w%-_]+$") ~= nil end, -- Code.lua
 	map = true, -- /wow-ai map ...: Map.lua (layers, herb/ore nodes)
@@ -3004,6 +3006,8 @@ SlashCmdList["WOWAI"] = function(msg)
 		WoWAI.Toggle(true)
 	elseif cmd == "feed" then
 		if WoWAIFeed then WoWAIFeed.Command(rest) else print("|cff66ccff[WoW AI]|r the event feed module did not load") end
+	elseif cmd == "route" then
+		if WoWAIRoute then WoWAIRoute.Command(rest) else print("|cff66ccff[WoW AI]|r the route module did not load") end
 	elseif cmd == "reminder" then
 		if WoWAIReminder then WoWAIReminder.Command(rest) else print("|cff66ccff[WoW AI]|r the reminder module did not load") end
 	elseif cmd == "shop" then

@@ -109,6 +109,7 @@ function copyAddon(client) {
   for (const f of fs.readdirSync(ADDON_SRC)) {
     const target = path.join(dest, f);
     if (f === 'Inbox.lua' && fs.existsSync(target)) continue; // the bridge owns it once running
+    if (f === 'RouteData.lua' && fs.existsSync(target)) continue; // the route planner owns it once it has written one
     fs.copyFileSync(path.join(ADDON_SRC, f), target);
     copied++;
   }
