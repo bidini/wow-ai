@@ -1,4 +1,4 @@
-# Map layers, navigator and gathering nodes
+# Map layers and gathering nodes
 
 The agent can mark your world map. What it draws are **layers**: a named list of points (`uiMapID`, x, y in map percent, a label, a kind), optionally **ordered** (a route: numbered pins joined by lines) and **looping** (a farming circuit).
 
@@ -18,8 +18,7 @@ The agent can mark your world map. What it draws are **layers**: a named list of
 
 ## In game
 
-- **World map:** pins for every visible layer on the map you are looking at, projected onto continent maps too. Hover for the label; click a pin to navigate to it.
-- **Navigator:** a small frame with an arrow and the distance in yards to the current stop of the route. It starts on a route as soon as one arrives (unless you are already following another one), advances when you get within 12 yards, and wraps around on loops. Drag it to move it; right-click skips a stop. It shows "no position here" in instances, where the game gives addons no coordinates.
+- **World map:** pins for every visible layer on the map you are looking at, projected onto continent maps too. Hover for the label.
 - **Herb and ore nodes:** with a `WoWAI_Nodes` data addon installed (see below), every herb and ore spawn point of the zone on the world map, filtered to what your skill can gather.
 
 | Command | Does |
@@ -28,7 +27,6 @@ The agent can mark your world map. What it draws are **layers**: a named list of
 | `/wow-ai map ore [on\|off]`, `/wow-ai map herb [on\|off]` | Show or hide mining / herbalism nodes |
 | `/wow-ai map filter all\|skill` | Every node, or only those your skill can gather (default) |
 | `/wow-ai map hide <layer>`, `/wow-ai map show <layer>` | Hide or show a layer locally |
-| `/wow-ai map nav <layer> [n]`, `next`, `prev`, `stop` | Drive the navigator |
 
 `/aimap` is a shorter alias for `/wow-ai map`. Everything here only reads positions and draws. Nothing moves, targets or acts for you.
 

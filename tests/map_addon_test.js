@@ -90,12 +90,12 @@ function shownPins(vm) {
 const LAYER = `{ epoch = "e1", version = 1, layers = { { name = "mining", title = "Copper loop", ordered = true, loop = true, points = {
   { 1432, 50, 40, "1. Copper Vein", "ore" }, { 1432, 60, 50, "2. Copper Vein", "ore" }, { 1432, 55, 70, "3. Tin Vein", "ore" } } } } }`;
 
-test('Sync applies a new version once, starts navigation, ignores stale versions', () => {
+test('Sync applies a new version once, ignores stale versions, and there is no arrow', () => {
   const vm = newVM();
   vm.run(`WoWAIMap.Sync(${LAYER})`);
   assert.equal(vm.evaluate('WoWAIMapDB.map.version'), '1');
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.layer'), 'mining');
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '1');
+  assert.equal(vm.evaluate('WoWAIMapDB.nav'), null, 'no navigation is started');
+  assert.equal(vm.evaluate('WoWAINavigator'), null, 'and no arrow frame exists');
   const prints = () => vm.num('#STUB.prints');
   const before = prints();
   vm.run(`WoWAIMap.Sync(${LAYER})`); // same version: nothing
@@ -108,28 +108,6 @@ test('Sync applies a new version once, starts navigation, ignores stale versions
   assert.equal(prints(), before);
   vm.run(`WoWAIMap.Sync({ epoch = "e2", version = 5, layers = {} })`);
   assert.equal(vm.num('#WoWAIMapDB.map.layers'), 0);
-  assert.equal(vm.evaluate('WoWAIMapDB.nav'), null);
-});
-
-test('a new route does not take over a route the player is already following', () => {
-  const vm = newVM();
-  vm.run(`WoWAIMap.Sync(${LAYER})`);
-  vm.run('SlashCmdList.WOWAIMAP("nav mining 2")');
-  vm.run(`local m = ${LAYER}; m.version = 2; m.layers[2] = { name = "quests", title = "Westfall", ordered = true, loop = false,
-    points = { { 1432, 10, 10, "1. Talk", "quest" }, { 1432, 20, 20, "2. Kill", "kill" } } }; WoWAIMap.Sync(m)`);
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.layer'), 'mining');
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '2');
-  // With nothing being followed, the next route starts by itself.
-  vm.run('SlashCmdList.WOWAIMAP("stop")');
-  vm.run(`local m = ${LAYER}; m.version = 3; m.layers[1].points[1][4] = "1. Rich Copper"; WoWAIMap.Sync(m)`);
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.layer'), 'mining');
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '1');
-});
-
-test('slot data carrying a map reaches the map module', () => {
-  const vm = newVM();
-  vm.run(`WoWAI_Inbox = { replies = {}, map = ${LAYER} }; STUB.FireEvent("PLAYER_LOGIN")`);
-  assert.equal(vm.evaluate('WoWAIMapDB.map.layers[1].title'), 'Copper loop');
 });
 
 test('pins land where the points are, on the zone map and on the continent', () => {
@@ -144,34 +122,6 @@ test('pins land where the points are, on the zone map and on the continent', () 
   assert.equal(pins[0], '550,308,1,Copper loop');
   vm.run('STUB.shownMap = 947; WoWAIMap.Refresh()'); // no rect: nothing drawn
   assert.deepEqual(shownPins(vm), []);
-});
-
-test('navigator shows yards and bearing, and advances on arrival', () => {
-  const vm = newVM();
-  vm.run(`WoWAIMap.Sync(${LAYER})`);
-  // Player at Loch Modan 50,50 -> continent (0.55, 0.45); stop 1 (50,40) is 150 yd due north.
-  vm.run('STUB.posX, STUB.posY = 0.5, 0.5; WoWAIMap.UpdateNavigator()');
-  assert.match(vm.evaluate('WoWAINavigator.text.text'), /^150 yd/);
-  assert.ok(Math.abs(vm.num('WoWAINavigator.arrow.rotation')) < 1e-9, 'north is straight up');
-  vm.run('STUB.facing = math.pi / 2; WoWAIMap.UpdateNavigator()'); // facing west: target is to the right
-  assert.ok(Math.abs(vm.num('WoWAINavigator.arrow.rotation') + Math.PI / 2) < 1e-9);
-  // Walk onto stop 1: it advances to stop 2 (60,50: 100 yd east and 150 yd south).
-  vm.run('STUB.facing = 0; STUB.posX, STUB.posY = 0.5, 0.4; WoWAIMap.UpdateNavigator()');
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '2');
-  vm.run('WoWAIMap.UpdateNavigator()');
-  assert.match(vm.evaluate('WoWAINavigator.text.text'), /^180 yd/);
-  // South-east: a clockwise turn between a quarter and a half.
-  assert.ok(Math.abs(vm.num('WoWAINavigator.arrow.rotation') - Math.atan2(-100, -150)) < 1e-9);
-  // Due east from the same spot's latitude: exactly a clockwise quarter turn.
-  vm.run('STUB.posX, STUB.posY = 0.5, 0.5; WoWAIMap.UpdateNavigator()');
-  assert.match(vm.evaluate('WoWAINavigator.text.text'), /^100 yd/);
-  assert.ok(Math.abs(vm.num('WoWAINavigator.arrow.rotation') + Math.PI / 2) < 1e-9, 'east is a clockwise quarter turn');
-  // Loop: after the last stop it wraps to the first.
-  vm.run('WoWAIMap.Step(1); WoWAIMap.Step(1)');
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '1');
-  // Elsewhere with no position: says so instead of pointing.
-  vm.run('STUB.playerMap = 999; WoWAIMap.UpdateNavigator()');
-  assert.equal(vm.evaluate('WoWAINavigator.text.text'), 'no position here');
 });
 
 test('herb/ore nodes toggle and follow the gathering skill', () => {
@@ -201,17 +151,38 @@ test('herb/ore nodes toggle and follow the gathering skill', () => {
   assert.match(vm.evaluate('WoWAI.GameContext()'), /Professions: Bergbau 50\/75(\n|$)/);
 });
 
-test('/wow-ai map hide, show, nav and stop', () => {
+test('/wow-ai map hide and show; the old navigation commands do nothing', () => {
   const vm = newVM();
   vm.run(`WoWAIMap.Sync(${LAYER})`);
   vm.run('SlashCmdList.WOWAIMAP("hide mining")');
   assert.equal(shownPins(vm).length, 0);
   vm.run('SlashCmdList.WOWAIMAP("show mining")');
   assert.equal(shownPins(vm).length, 3);
-  vm.run('SlashCmdList.WOWAIMAP("nav mining 3")');
-  assert.equal(vm.evaluate('WoWAIMapDB.nav.index'), '3');
-  vm.run('SlashCmdList.WOWAIMAP("stop")');
+  for (const old of ['nav mining 3', 'next', 'prev', 'stop']) vm.run(`SlashCmdList.WOWAIMAP("${old}")`);
   assert.equal(vm.evaluate('WoWAIMapDB.nav'), null);
-  assert.equal(vm.evaluate('WoWAINavigator.shown'), 'false');
+  assert.equal(vm.evaluate('WoWAINavigator'), null);
   vm.run('SlashCmdList.WOWAIMAP("")'); // status never errors
+});
+
+test('pins show the label only, and a click does nothing', () => {
+  const vm = newVM();
+  vm.run(`WoWAIMap.Sync(${LAYER})`);
+  vm.run('WoWAIMap.Refresh()');
+  vm.run(`
+    local overlay = WorldMapFrame:GetCanvas().children[#WorldMapFrame:GetCanvas().children]
+    for _, c in ipairs(overlay.children) do
+      if c.kind == "Button" and c.shown then FIRST = c; break end
+    end
+    HINT = FIRST.info.hint
+    if FIRST.scripts.OnClick then FIRST.scripts.OnClick(FIRST) end`);
+  assert.equal(vm.evaluate('HINT'), null);
+  assert.equal(vm.evaluate('WoWAIMapDB.nav'), null);
+});
+
+test('navigation left in the saved variables by an older version is dropped at login', () => {
+  const vm = newVM();
+  vm.run('WoWAIMapDB.nav = { layer = "mining", index = 2 }; WoWAIMapDB.navPos = { "TOP", 0, -120 }');
+  vm.run('STUB.FireEvent("PLAYER_LOGIN")');
+  assert.equal(vm.evaluate('WoWAIMapDB.nav'), null);
+  assert.equal(vm.evaluate('WoWAIMapDB.navPos'), null);
 });

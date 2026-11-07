@@ -2879,7 +2879,7 @@ local HELP = table.concat({
 	"/wow-ai shop [<number>|clear]   what your agent suggested buying; at the auction house a click types the item name into the search box (no argument = list)",
 	"/wow-ai code [load <slot>|stop <name|all>|on|off]   run addon code the agent offered and the bridge accepted; nothing runs until you load it, and never at login (no argument = status)",
 	"/wow-ai feed [on|off|atlas|info|hold <s>|shows <n>]   the event feed: quests, zones, level-ups and your path, sent to the bridge for the agent to read (no argument = status)",
-	"/wow-ai map [...]              map layers the agent drew, the route navigator and herb/ore nodes (no argument = status and subcommands; /aimap is the same)",
+	"/wow-ai map [...]              map layers the agent drew and herb/ore nodes (no argument = status and subcommands; /aimap is the same)",
 	"/wow-ai mode pixel             no-reload transport (default)",
 	"/wow-ai mode reload            fallback transport: a /reload per step",
 	"/wow-ai resend                 show the strip again if the bridge missed it",
@@ -2926,7 +2926,7 @@ local COMMAND_ARGS = {
 	reminder = function(rest) return rest == "" or rest == "clear" or rest:match("^window") ~= nil end, -- Reminder.lua
 	shop = function(rest) return rest == "" or rest == "clear" or rest:match("^%d+$") ~= nil end, -- Shop.lua
 	code = function(rest) return rest == "" or rest == "on" or rest == "off" or rest == "status" or rest:match("^load %d+$") ~= nil or rest:match("^stop [%w%-_]+$") ~= nil end, -- Code.lua
-	map = true, -- /wow-ai map ...: Map.lua (layers, navigator, herb/ore nodes)
+	map = true, -- /wow-ai map ...: Map.lua (layers, herb/ore nodes)
 	macro = { undo = true }, -- /wow-ai macro undo; "/ai macro for my warrior" still goes to the agent
 }
 

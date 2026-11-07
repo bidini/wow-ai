@@ -4,6 +4,10 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Removed
+
+- The navigator arrow (and `/wow-ai map nav`, `next`, `prev`, `stop`, and clicking a pin to navigate). Map pins and lines stay.
+
 ### Fixed
 
 - Mac: the addon starts the pixel strip 96 units right of the window's corner (other clients: unchanged), and the capture finds it wherever it begins (up to 160 pixels in). The Dock on the left edge covered the first cells of the strip's lower rows and every long message failed its checksum.

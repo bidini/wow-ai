@@ -11,12 +11,9 @@ local ADDON_NAME = ...
 local M = {}
 WoWAIMap = M
 
-local ARRIVE_YARDS = 12
 local NODE_SIZE, PIN_SIZE = 9, 16
 local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
-local ARROW = "Interface\\Minimap\\MinimapArrow"
 local CONTINENT = (Enum and Enum.UIMapType and Enum.UIMapType.Continent) or 2
-local atan2 = math.atan2 or math.atan -- Lua 5.1 in game; 5.3 in the test VM
 
 local KIND_COLOR = {
 	ore = { 0.95, 0.6, 0.25 }, herb = { 0.35, 0.95, 0.35 }, quest = { 1, 0.85, 0 }, turnin = { 0.35, 0.8, 1 },
@@ -25,7 +22,7 @@ local KIND_COLOR = {
 	flight = { 0.55, 0.75, 1 }, poi = { 1, 1, 1 },
 }
 
-local mdb -- WoWAIMapDB: { map, hidden = { [layer] = true }, nodes = { ore, herb, filter }, nav = { layer, index }, navPos }
+local mdb -- WoWAIMapDB: { map, hidden = { [layer] = true }, nodes = { ore, herb, filter } }
 
 local function Try(fn, ...)
 	if type(fn) ~= "function" then return nil end
@@ -114,34 +111,6 @@ end
 -- Used by Feed.lua to describe where each map lies on its continent (docs/DISTANCE.md).
 M.ContinentOf, M.ContinentYards = ContinentOf, ContinentYards
 
--- The player's position as (continent, cx, cy) in continent map space.
-local function PlayerOnContinent()
-	local mapID = Try(C_Map.GetBestMapForUnit, "player")
-	if not mapID then return end
-	local pos = Try(C_Map.GetPlayerMapPosition, mapID, "player")
-	if not pos then return end
-	local px, py = pos.x, pos.y
-	if not px or (px == 0 and py == 0) then return end
-	local cont = ContinentOf(mapID)
-	if not cont then return end
-	local cx, cy = Project(mapID, px, py, cont)
-	if cx then return cont, cx, cy end
-end
-
--- Yards and bearing (radians, counter-clockwise from north) from the player to a point.
-local function Heading(p)
-	local cont, px, py = PlayerOnContinent()
-	if not cont then return nil, "no position here" end
-	local tcont = ContinentOf(p[1])
-	if tcont ~= cont then return nil, "on another continent" end
-	local tx, ty = Project(p[1], p[2] / 100, p[3] / 100, cont)
-	if not tx then return nil, "cannot place this point" end
-	local w, h = ContinentYards(cont)
-	local east, south = (tx - px) * (w or 1), (ty - py) * (h or 1)
-	local dist = w and math.sqrt(east * east + south * south) or nil
-	return dist, atan2(-east, -south)
-end
-
 ---------------------------------------------------------------------------
 -- World map drawing
 ---------------------------------------------------------------------------
@@ -176,10 +145,6 @@ local function NewPin(size)
 	b.num:SetTextColor(0, 0, 0)
 	b:SetScript("OnEnter", ShowTip)
 	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	b:RegisterForClicks("LeftButtonUp")
-	b:SetScript("OnClick", function(self)
-		if self.info and self.info.layer then M.Navigate(self.info.layer, self.info.index) end
-	end)
 	return b
 end
 
@@ -279,7 +244,6 @@ function M.Refresh()
 	local scale = 1 / CanvasScale()
 	overlay.drawnScale = CanvasScale()
 	DrawNodes(mapID, scale)
-	local nav = DB().nav
 	for _, l in ipairs(Layers()) do
 		if not mdb.hidden[l.name] then
 			local prev, first
@@ -292,12 +256,11 @@ function M.Refresh()
 					pinCount = pinCount + 1
 					local b = pins[pinCount]
 					if not b then b = NewPin(PIN_SIZE); pins[pinCount] = b end
-					local current = nav and nav.layer == l.name and nav.index == i
 					b.dot:SetVertexColor(color[1], color[2], color[3], 1)
-					b.ring:SetVertexColor(current and 1 or 0, current and 1 or 0, current and 1 or 0, 0.9)
+					b.ring:SetVertexColor(0, 0, 0, 0.9)
 					b.num:SetText(l.ordered and tostring(i) or "")
-					b:SetFrameLevel(overlay:GetFrameLevel() + (current and 20 or 10))
-					b.info = { title = l.title, label = p[4] ~= "" and p[4] or l.name, layer = l.name, index = i, hint = "Click: navigate here" }
+					b:SetFrameLevel(overlay:GetFrameLevel() + 10)
+					b.info = { title = l.title, label = p[4] ~= "" and p[4] or l.name, }
 					Place(b, x, y, scale)
 					prev = { x, y }
 					first = first or { x, y, color }
@@ -331,130 +294,6 @@ local function SetupWorldMap()
 end
 
 ---------------------------------------------------------------------------
--- Navigator: arrow, distance, and auto-advance along an ordered layer
----------------------------------------------------------------------------
-
-local nav
-
-local function NavPoint()
-	local n = DB().nav
-	if not n then return end
-	local l = FindLayer(n.layer)
-	if not l or not l.points[n.index] then return end
-	return l, l.points[n.index], n.index
-end
-
-local function BuildNavigator()
-	nav = CreateFrame("Frame", "WoWAINavigator", UIParent, "BackdropTemplate")
-	nav:SetSize(250, 44)
-	nav:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-	nav:SetBackdropColor(0, 0, 0, 0.7)
-	local p = DB().navPos
-	if p then nav:SetPoint(p[1], UIParent, p[1], p[2], p[3]) else nav:SetPoint("TOP", UIParent, "TOP", 0, -120) end
-	nav:SetMovable(true)
-	nav:EnableMouse(true)
-	nav:RegisterForDrag("LeftButton")
-	nav:SetScript("OnDragStart", nav.StartMoving)
-	nav:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		local point, _, _, x, y = self:GetPoint()
-		DB().navPos = { point, x, y }
-	end)
-	nav:SetScript("OnMouseUp", function(_, button)
-		if button == "RightButton" then M.Step(1) end
-	end)
-	nav.arrow = nav:CreateTexture(nil, "ARTWORK")
-	nav.arrow:SetSize(34, 34)
-	nav.arrow:SetPoint("LEFT", 6, 0)
-	nav.arrow:SetTexture(ARROW)
-	nav.title = nav:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	nav.title:SetPoint("TOPLEFT", 46, -7)
-	nav.title:SetPoint("RIGHT", -8, 0)
-	nav.title:SetJustifyH("LEFT")
-	nav.title:SetWordWrap(false)
-	nav.text = nav:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	nav.text:SetPoint("BOTTOMLEFT", 46, 8)
-	nav.text:SetPoint("RIGHT", -8, 0)
-	nav.text:SetJustifyH("LEFT")
-	nav.text:SetWordWrap(false)
-	nav:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-		GameTooltip:AddLine("Route")
-		GameTooltip:AddLine("Drag to move, right-click to skip this stop. /wow-ai map for options.", 1, 1, 1, true)
-		GameTooltip:Show()
-	end)
-	nav:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	nav:SetScript("OnUpdate", function(self, elapsed)
-		self.t = (self.t or 0) + elapsed
-		if self.t < 0.1 then return end
-		self.t = 0
-		M.UpdateNavigator()
-	end)
-	nav:Hide()
-end
-
-function M.UpdateNavigator()
-	local l, p, i = NavPoint()
-	if not l then if nav then nav:Hide() end return end
-	if not nav then BuildNavigator() end
-	nav:Show()
-	nav.title:SetText(string.format("%d/%d  %s", i, #l.points, p[4] ~= "" and p[4] or l.title))
-	local dist, bearing = Heading(p)
-	if not dist and type(bearing) == "string" then
-		nav.arrow:Hide()
-		nav.text:SetText(bearing)
-		return
-	end
-	nav.arrow:Show()
-	local facing = Try(GetPlayerFacing)
-	if facing and bearing then nav.arrow:SetRotation(bearing - facing) else nav.arrow:SetRotation(0) end
-	if dist then
-		nav.text:SetText(string.format("%d yd  |cff888888%s|r", math.floor(dist + 0.5), l.title))
-		if dist <= ARRIVE_YARDS then
-			Try(PlaySound, SOUNDKIT and SOUNDKIT.MAP_PING or 3175)
-			M.Step(1, true)
-		end
-	else
-		nav.text:SetText(l.title)
-	end
-end
-
-function M.Navigate(layer, index)
-	local l = FindLayer(layer)
-	if not l then Print("no layer " .. tostring(layer)); return end
-	DB().nav = { layer = layer, index = math.max(1, math.min(index or 1, #l.points)) }
-	mdb.hidden[layer] = nil
-	M.UpdateNavigator()
-	M.Refresh()
-end
-
-function M.Step(delta, arrived)
-	local l, _, i = NavPoint()
-	if not l then return end
-	local nexti = i + delta
-	if nexti > #l.points then
-		if l.loop then nexti = 1 else
-			Print("route finished: " .. l.title)
-			mdb.nav = nil
-			M.UpdateNavigator()
-			M.Refresh()
-			return
-		end
-	elseif nexti < 1 then
-		nexti = l.loop and #l.points or 1
-	end
-	mdb.nav.index = nexti
-	M.Refresh()
-	if not arrived then M.UpdateNavigator() end
-end
-
-function M.Stop()
-	DB().nav = nil
-	M.UpdateNavigator()
-	M.Refresh()
-end
-
----------------------------------------------------------------------------
 -- Sync from the bridge
 ---------------------------------------------------------------------------
 
@@ -478,20 +317,10 @@ function M.Sync(m)
 		end
 	end
 	mdb.map = { epoch = m.epoch, version = tonumber(m.version) or 0, layers = layers }
-	-- Drop navigation that points at a layer that is gone.
-	if mdb.nav and not FindLayer(mdb.nav.layer) then mdb.nav = nil end
 	for _, l in ipairs(changed) do
 		mdb.hidden[l.name] = nil
 		Print(string.format("%s: %d point(s)%s. Open the map (M) to see it.", l.title or l.name, #l.points, l.ordered and ", route" or ""))
-		-- A new or changed route on the player's continent starts navigation at its first
-		-- stop, unless the player is already following another route.
-		local here = PlayerOnContinent()
-		local free = not mdb.nav or mdb.nav.layer == l.name
-		if l.ordered and #l.points > 0 and free and (not here or ContinentOf(l.points[1][1]) == here) then
-			mdb.nav = { layer = l.name, index = 1 }
-		end
 	end
-	M.UpdateNavigator()
 	M.Refresh()
 end
 
@@ -503,11 +332,11 @@ local function Status()
 	local layers = Layers()
 	if #layers == 0 then Print("no layers yet. Ask the agent for a route, e.g. /ai route me through copper veins in Loch Modan") end
 	for _, l in ipairs(layers) do
-		Print(string.format("%s%s|r  %s (%d point(s))%s", mdb.hidden[l.name] and "|cff888888" or "|cffffffff", l.name, l.title or "", #l.points, (mdb.nav and mdb.nav.layer == l.name) and string.format("  navigating %d/%d", mdb.nav.index, #l.points) or ""))
+		Print(string.format("%s%s|r  %s (%d point(s))", mdb.hidden[l.name] and "|cff888888" or "|cffffffff", l.name, l.title or "", #l.points))
 	end
 	local n = mdb.nodes
 	Print(string.format("nodes: ore %s, herb %s, filter %s%s", n.ore and "on" or "off", n.herb and "on" or "off", n.filter, WoWAINodes and "" or "  (WoWAI_Nodes data addon not installed)"))
-	Print("commands: /wow-ai map ore|herb [on|off], filter all|skill, show|hide <layer>, nav <layer> [n], next, prev, stop  (/aimap is the same)")
+	Print("commands: /wow-ai map ore|herb [on|off], filter all|skill, show|hide <layer>  (/aimap is the same)")
 end
 
 function M.Command(msg)
@@ -528,12 +357,6 @@ function M.Command(msg)
 		if not FindLayer(rest) then Print("no layer " .. rest); return end
 		mdb.hidden[rest] = (cmd == "hide") or nil
 		M.Refresh()
-	elseif cmd == "nav" then
-		local name, idx = rest:match("^(%S+)%s*(%d*)$")
-		M.Navigate(name, tonumber(idx))
-	elseif cmd == "next" then M.Step(1)
-	elseif cmd == "prev" then M.Step(-1)
-	elseif cmd == "stop" then M.Stop()
 	else Status() end
 end
 
@@ -550,8 +373,8 @@ ev:SetScript("OnEvent", function(_, event, arg1)
 		SetupWorldMap()
 	elseif event == "PLAYER_LOGIN" then
 		DB()
+		mdb.nav, mdb.navPos = nil, nil -- the arrow is gone; forget what an older version saved for it
 		SetupWorldMap()
-		M.UpdateNavigator()
 	elseif event == "SKILL_LINES_CHANGED" then
 		M.Refresh()
 	end

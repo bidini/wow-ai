@@ -16,7 +16,7 @@ Two more line types in an event-feed batch ([EVENTS.md](EVENTS.md)):
 
 | Line | Meaning |
 |---|---|
-| `K cont w h` | continent `cont` is `w` by `h` yards (integers). Measured by the engine's own map-to-world transform, the same call the map navigator uses. |
+| `K cont w h` | continent `cont` is `w` by `h` yards (integers). Measured by the engine's own map-to-world transform, the same call the engine uses for the map. |
 | `W map cont minX maxX minY maxY name` | map `map` lies inside continent `cont`. The four numbers are where its edges fall on the continent map, in **ten-thousandths** of the continent (0 to 10000). `name` is cleaned and cut at 30 bytes. |
 
 When: on entering the world and on a new zone, the addon queues the current map and every zone map of the current continent. Each map is sent once per game session (a `/reload` or a new login sends them again, so a batch the capture missed is made up later), at most 8 per batch and only as many as fit beside the other lines, so a continent of 40 zones takes about 5 batches (30 seconds). `/wow-ai feed atlas` queues everything again, for example after the bridge's `maps.json` was deleted. A map the client cannot place (instances, no continent) is skipped without error.
