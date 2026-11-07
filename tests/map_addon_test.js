@@ -56,6 +56,8 @@ function newVM() {
   stub += `
 function Methods.CreateLine(self, name, layer) local l = NewObjectPublic("Line", name, self); table.insert(self.textures, l); return l end
 function Methods.SetRotation(self, r) self.rotation = r end
+function Methods.GetFont(self) return "Fonts\\\\FRIZQT__.TTF", 10, "" end
+function Methods.SetFont(self, f, s, flags) self.font, self.fontSize, self.fontFlags = f, s, flags end
 function Methods.SetVertexColor(self, r, g, b, a) self.vcolor = { r, g, b, a } end
 function Methods.SetScale(self, s) self.scale = s end
 function Methods.SetAllPoints(self, rel) if rel then self.width, self.height = rel.width, rel.height end end
@@ -222,9 +224,45 @@ function routePins(vm) {
   return s ? s.split(';') : [];
 }
 
-test('route steps are drawn as numbered markers; steps at one place share one, and a step with no position is left out', () => {
+const SPOTS = [[500, 280], [600, 350], [550, 490]]; // the real places of steps 1, 2-3 and 5 on the 1000x700 canvas
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const xy = s => s.split(',').slice(0, 2).map(Number);
+
+test('route steps are numbered markers; steps at one place share one, and a step with no position is left out', () => {
   const vm = routeOnMap();
-  assert.deepEqual(routePins(vm), ['500,280,1,1. Accept: A (Giver)', '600,350,2,2. Fly: X to Y|3. Turn in: A (Giver)', '550,490,5,5. Kill 8: B for C']);
+  const pins = routePins(vm);
+  assert.deepEqual(pins.map(p => p.split(',').slice(2).join(',')), ['1,1. Accept: A (Giver)', '2,2. Fly: X to Y|3. Turn in: A (Giver)', '5,5. Kill 8: B for C']);
+});
+
+test('a marker is never on its real spot, on another marker, or on a layer pin', () => {
+  const vm = routeOnMap();
+  vm.run(`WoWAIMap.Sync(${LAYER}); WoWAIMap.Refresh()`); // the layer's round pins sit exactly on the route's real spots
+  const markers = routePins(vm).map(xy);
+  assert.equal(markers.length, 3);
+  const layerPins = shownPins(vm).map(xy);
+  assert.equal(layerPins.length, 3);
+  markers.forEach((m, i) => {
+    assert.ok(dist(m, SPOTS[i]) >= 20, `marker ${i + 1} keeps clear of its real spot (the game's icon): ${dist(m, SPOTS[i]).toFixed(1)}`);
+    SPOTS.forEach((s, j) => { if (j !== i) assert.ok(dist(m, s) >= 14, `marker ${i + 1} is not on the real spot of marker ${j + 1}`); });
+    layerPins.forEach(lp => assert.ok(dist(m, lp) >= 22, `marker ${i + 1} is not on a layer pin: ${dist(m, lp).toFixed(1)}`));
+    markers.forEach((o, j) => { if (j > i) assert.ok(dist(m, o) >= 26, `markers ${i + 1} and ${j + 1} do not overlap: ${dist(m, o).toFixed(1)}`); });
+  });
+});
+
+test('crowded steps are spread apart', () => {
+  const vm = routeOnMap();
+  vm.run(`WoWAIRouteData.steps = {}
+    for i = 1, 6 do WoWAIRouteData.steps[i] = { i = i, k = "kill", q = 300 + i, t = "Kill " .. i, z = "x", w = "-", m = 1432, x = 50 + i * 2, y = 40 } end
+    WoWAIRoute.Reload(); WoWAIMap.Refresh()`);
+  const markers = routePins(vm).map(xy);
+  assert.equal(markers.length, 6, 'steps 20 px apart each get a marker');
+  markers.forEach((m, i) => markers.forEach((o, j) => { if (j > i) assert.ok(dist(m, o) >= 26, `markers ${i + 1} and ${j + 1}: ${dist(m, o).toFixed(1)}`); }));
+});
+
+test('the numbers on route markers use a bold outline font', () => {
+  const vm = routeOnMap();
+  vm.run('local b; local c = WorldMapFrame:GetCanvas(); local o = c.children[#c.children]; for _, f in ipairs(o.children) do if f.fill and f.shown then b = f; break end end; RES_FONT = b.num.fontFlags');
+  assert.equal(vm.evaluate('RES_FONT'), 'THICKOUTLINE');
 });
 
 test('route markers are not the layers\' round pins and do not count as them', () => {
@@ -235,11 +273,12 @@ test('route markers are not the layers\' round pins and do not count as them', (
 test('route markers start at the current step, follow it, and appear on the continent map too', () => {
   const vm = routeOnMap();
   vm.run('STUB.log[100] = { ready = false }; WoWAIRoute.Refresh()');
-  assert.match(routePins(vm)[0], /^600,350,2,/, 'the accepted quest ticks step 1: markers start at the flight');
+  assert.match(routePins(vm)[0], /,2,2\. Fly: X to Y\|3\. Turn in/, 'the accepted quest ticks step 1: markers start at the flight');
   vm.run('STUB.shownMap = 1415; WoWAIMap.Refresh()');
-  assert.match(routePins(vm)[0], /^(\d+),(\d+),2,/);
-  // 1432 (60, 50) -> 1415 (0.56, 0.45) on a 1000x700 canvas.
-  assert.equal(routePins(vm)[0], '560,315,2,2. Fly: X to Y|3. Turn in: A (Giver)');
+  const p = routePins(vm)[0];
+  assert.match(p, /,2,2\. Fly/);
+  // 1432 (60, 50) -> 1415 (0.56, 0.45) on a 1000x700 canvas = (560, 315): the marker is beside it, not on it.
+  assert.ok(dist(xy(p), [560, 315]) >= 20);
 });
 
 test('/wow-ai route map off hides the markers and on shows them', () => {

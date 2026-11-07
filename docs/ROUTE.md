@@ -46,3 +46,5 @@ Twelve lines at most, starting from the step before the current one. Drag the fr
 ## On the world map
 
 The current step and the next ones (up to 14 with a position) are drawn on the world map as numbered diamonds joined by a thin line: violet for quest steps (accept, kill, collect, turn in), cyan for travel (flight, zeppelin, flight point, inn). The current step is larger. They are square and numbered, unlike the round game icons and the round pins the agent's layers use. Steps at one place share a marker; hover shows the steps there. Steps with no position (using the hearthstone) are left out. `/wow-ai route map off` hides them, `on` shows them.
+
+Markers never overlap: each one is moved to the nearest free place around its real spot (at least 20 pixels away, because the game draws its own quest icon there), clear of the other markers and of the agent's round pins, and a thin white line joins it to the spot. The numbers use a bold, outlined font.

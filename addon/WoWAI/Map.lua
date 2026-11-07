@@ -151,6 +151,8 @@ local lines, lineCount = {}, 0
 local nodePins, nodeCount = {}, 0
 local routePins, routeCount = {}, 0
 local ROUTE_SIZE = 14
+local ROUTE_R, SPOT_R = 15, 20 -- px: half a marker with its edge; the clear space kept around a real spot, where the game draws its own icon
+local ROUTE_LEAD = { 1, 1, 1 }
 local ROUTE_COLOR = { quest = { 0.9, 0.3, 1 }, travel = { 0.2, 0.9, 1 } } -- violet diamonds for quest steps, cyan for travel: not the round yellow/blue game icons
 
 local function ShowTip(self)
@@ -194,9 +196,12 @@ local function NewRoutePin()
 	b.fill:SetPoint("CENTER")
 	b.fill:SetSize(ROUTE_SIZE, ROUTE_SIZE)
 	b.fill:SetRotation(math.pi / 4)
-	b.num = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	-- Bold numbers: the game's number font if it has one, with a thick outline.
+	b.num = b:CreateFontString(nil, "OVERLAY", _G.NumberFontNormal and "NumberFontNormal" or "GameFontNormalSmall")
 	b.num:SetPoint("CENTER", 0, 0)
 	b.num:SetTextColor(1, 1, 1)
+	local file, size = Try(b.num.GetFont, b.num)
+	if type(file) == "string" then Try(b.num.SetFont, b.num, file, math.max(11, tonumber(size) or 12), "THICKOUTLINE") end
 	if b.SetMouseClickEnabled then b:SetMouseClickEnabled(false) end -- hover shows the tooltip; clicks go to the map
 	b:SetScript("OnEnter", ShowTip)
 	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -289,37 +294,78 @@ local function DrawNodes(mapID, scale)
 	end
 end
 
--- The planner's route (Route.lua): the current step and the next ones, joined by a line, steps at one place sharing a marker.
-local function DrawRoute(mapID, scale)
+-- The planner's route (Route.lua): the current step and the next ones, joined by a line. Steps at one place share a marker. A marker never
+-- sits on the real spot (the game's own quest icon is there), on another marker, or on a layer's pin: it is moved to the nearest free place
+-- around the spot and a thin line joins it to the spot. Sizes and distances are in screen pixels.
+local function DrawRoute(mapID, occupied)
 	local R = WoWAIRoute
 	local steps = R and R.MapSteps and R.MapSteps() or {}
-	local prev
-	local group
+	if #steps == 0 then return end
+	local cs = CanvasScale()
+	local W, H = overlay:GetWidth(), overlay:GetHeight()
+	local w, h = W * cs, H * cs
+	-- 1. where the steps really are; steps within a marker's width of each other share it
+	local groups, broken = {}, false
 	for _, st in ipairs(steps) do
 		local x, y = Project(st.m, st.x / 100, st.y / 100, mapID)
 		if x and x >= 0 and x <= 1 and y >= 0 and y <= 1 then
-			if group and math.abs(group.x - x) < 0.004 and math.abs(group.y - y) < 0.004 then
-				group.lines[#group.lines + 1] = st.i .. ". " .. st.t
-				group.pin.info.label = table.concat(group.lines, "\n")
+			local g = groups[#groups]
+			if g and not broken and math.abs(g.px - x * w) < ROUTE_R and math.abs(g.py - y * h) < ROUTE_R then
+				g.steps[#g.steps + 1] = st
 			else
-				routeCount = routeCount + 1
-				local b = routePins[routeCount]
-				if not b then b = NewRoutePin(); routePins[routeCount] = b end
-				local c = st.travel and ROUTE_COLOR.travel or ROUTE_COLOR.quest
-				b.fill:SetColorTexture(c[1], c[2], c[3], 1)
-				b.num:SetText(tostring(st.i))
-				b:SetFrameLevel(overlay:GetFrameLevel() + 20)
-				b.info.title = "Route step " .. st.i .. (st.current and " (now)" or "")
-				b.info.label = st.i .. ". " .. st.t
-				b.info.hint = nil
-				Place(b, x, y, st.current and scale * 1.35 or scale)
-				if prev then AddLine(prev[1], prev[2], x, y, ROUTE_COLOR.quest, 1.5 * scale) end
-				group = { x = x, y = y, pin = b, lines = { st.i .. ". " .. st.t } }
-				prev = { x, y }
+				groups[#groups + 1] = { x = x, y = y, px = x * w, py = y * h, steps = { st }, gap = broken }
 			end
+			broken = false
 		else
-			prev, group = nil, nil
+			broken = true
 		end
+	end
+	-- 2. a free place for each marker
+	local ANGLES = { 45, 135, -45, -135, 90, 0, 180, -90, 22, 68, 112, 158, -22, -68, -112, -158 }
+	local prev
+	for gi, g in ipairs(groups) do
+		local first = g.steps[1]
+		local big = first.current and 1.35 or 1
+		local r = ROUTE_R * big
+		local best
+		for ring = 1, 4 do
+			local d = SPOT_R + r + (ring - 1) * r * 1.5
+			for _, a in ipairs(ANGLES) do
+				local cx, cy = g.px + d * math.cos(math.rad(a)), g.py - d * math.sin(math.rad(a))
+				local free = cx - r >= 0 and cy - r >= 0 and cx + r <= w and cy + r <= h
+				for _, o in ipairs(occupied) do
+					if free and (cx - o[1]) ^ 2 + (cy - o[2]) ^ 2 < (r + o[3] + 2) ^ 2 then free = false end
+				end
+				for gj, o in ipairs(groups) do -- nor on another step's real spot
+					if free and gj ~= gi and (cx - o.px) ^ 2 + (cy - o.py) ^ 2 < (r + SPOT_R * 0.6) ^ 2 then free = false end
+				end
+				if free then best = { cx, cy }; break end
+			end
+			if best then break end
+		end
+		best = best or { g.px + (SPOT_R + r) * 0.7, g.py - (SPOT_R + r) * 0.7 }
+		occupied[#occupied + 1] = { best[1], best[2], r }
+		routeCount = routeCount + 1
+		local b = routePins[routeCount]
+		if not b then b = NewRoutePin(); routePins[routeCount] = b end
+		local c = first.travel and ROUTE_COLOR.travel or ROUTE_COLOR.quest
+		b.fill:SetColorTexture(c[1], c[2], c[3], 1)
+		b.num:SetText(tostring(first.i))
+		b:SetFrameLevel(overlay:GetFrameLevel() + 20)
+		local lines, nums = {}, {}
+		for _, st in ipairs(g.steps) do lines[#lines + 1] = st.i .. ". " .. st.t; nums[#nums + 1] = st.i end
+		b.info.title = "Route step " .. table.concat(nums, ", ") .. (first.current and " (now)" or "")
+		b.info.label = table.concat(lines, "\n")
+		b.info.hint = nil
+		g.mx, g.my = best[1], best[2]
+		local fscale = big / cs
+		b:SetScale(fscale)
+		b:ClearAllPoints()
+		b:SetPoint("CENTER", overlay, "TOPLEFT", g.mx / (cs * fscale), -g.my / (cs * fscale))
+		b:Show()
+		AddLine(g.px / w, g.py / h, g.mx / w, g.my / h, ROUTE_LEAD, 1.2 / cs) -- from the real spot to its marker
+		if prev and not g.gap then AddLine(prev.mx / w, prev.my / h, g.mx / w, g.my / h, ROUTE_COLOR.quest, 1.5 / cs) end
+		prev = g
 	end
 end
 
@@ -335,7 +381,8 @@ function M.Refresh()
 	local scale = 1 / CanvasScale()
 	overlay.drawnScale = CanvasScale()
 	DrawNodes(mapID, scale)
-	DrawRoute(mapID, scale)
+	local occupied = {} -- screen-pixel circles { x, y, radius } the route markers keep clear of
+	local cs, ow, oh = CanvasScale(), overlay:GetWidth(), overlay:GetHeight()
 	for _, l in ipairs(Layers()) do
 		if not mdb.hidden[l.name] then
 			local prev, first
@@ -354,6 +401,7 @@ function M.Refresh()
 					b:SetFrameLevel(overlay:GetFrameLevel() + 10)
 					b.info = { title = l.title, label = p[4] ~= "" and p[4] or l.name, }
 					Place(b, x, y, scale)
+					occupied[#occupied + 1] = { x * ow * cs, y * oh * cs, PIN_SIZE / 2 + 3 }
 					prev = { x, y }
 					first = first or { x, y, color }
 				else
@@ -366,6 +414,7 @@ function M.Refresh()
 			end
 		end
 	end
+	DrawRoute(mapID, occupied)
 end
 
 local function SetupWorldMap()
