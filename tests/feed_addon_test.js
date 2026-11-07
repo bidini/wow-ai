@@ -944,7 +944,7 @@ function flightPoints(batches) {
       nodes.push({ id: +m[1], state: +m[2], map: +m[3], x: +m[4] / 10, y: +m[5] / 10, name: m[6] });
     }
   }
-  return { src: chunks[0][4], nodes };
+  return { src: chunks[0][4].split('~')[0], note: chunks[0][4].split('~')[1] || '', nodes };
 }
 
 test('flight points: the nodes the client lists for the continent go out with their place and name', () => {
@@ -1013,4 +1013,37 @@ test('hearthstone: a client without the calls sends no B line and raises no erro
   const vm = ready({ settle: false });
   assert.deepEqual(linesStarting(collect(vm, 70), 'B'), []);
   assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
+});
+
+test('flight points: nodes with no state in the list take it from GetAllTaxiNodes when a flight master is opened', () => {
+  const vm = flightVM(`
+    local all = {}
+    for i, n in ipairs(STUB.taxi) do all[i] = { nodeID = n.nodeID, state = n.state } end
+    local f = C_TaxiMap.GetTaxiNodesForMap
+    C_TaxiMap.GetTaxiNodesForMap = function(m) local l = {}; for i, n in ipairs(f(m)) do l[i] = { nodeID = n.nodeID, name = n.name, position = n.position } end return l end
+    C_TaxiMap.GetAllTaxiNodes = function(m) return all end`);
+  assert.deepEqual(flightPoints(collect(vm, 70)).nodes.map(n => n.state), [9, 9, 9], 'no state before a flight master is opened');
+  vm.run('STUB.FireEvent("TAXIMAP_OPENED")');
+  assert.deepEqual(flightPoints(collect(vm, 40)).nodes.map(n => [n.id, n.state]), [[11, 1], [12, 2], [13, 0]]);
+});
+
+test('flight points: with the old flight master calls, the node types become states while the window is open', () => {
+  const vm = flightVM(`
+    local f = C_TaxiMap.GetTaxiNodesForMap
+    C_TaxiMap.GetTaxiNodesForMap = function(m) local l = {}; for i, n in ipairs(f(m)) do l[i] = { nodeID = n.nodeID, name = n.name, position = n.position } end return l end
+    STUB.types = { "REACHABLE", "NONE", "CURRENT" }
+    function NumTaxiNodes() return 3 end
+    function TaxiNodeName(i) return STUB.taxi[i].name end
+    function TaxiNodeGetType(i) return STUB.types[i] end`);
+  collect(vm, 70);
+  vm.run('STUB.FireEvent("TAXIMAP_OPENED")');
+  assert.deepEqual(flightPoints(collect(vm, 40)).nodes.map(n => [n.id, n.state]), [[11, 1], [12, 2], [13, 0]], 'NONE (not discovered) is unreachable');
+  vm.run('function NumTaxiNodes() return 0 end; STUB.FireEvent("ZONE_CHANGED_NEW_AREA")');
+  assert.equal(flightPoints(collect(vm, 40)), null, 'what the window said is remembered after it closes, nothing is sent again');
+});
+
+test('flight points: the first line says which fields and calls this client has, so a missing state can be seen', () => {
+  const vm = flightVM();
+  const line = linesStarting(collect(vm, 70), 'T')[0].split('\t')[4];
+  assert.match(line, /^forMap~fields=[^;]*nodeID[^;]*;api=.*C_TaxiMap\.GetTaxiNodesForMap/);
 });

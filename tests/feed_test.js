@@ -280,6 +280,7 @@ test('parsePayload reads flight points and the bind line', () => {
   assert.deepEqual(p.hero.hearth, { bind: 'Brill', readyAt: 1700003600, has: 1, pos: { map: 1420, x: 61.2, y: 50.8 } });
   assert.deepEqual(F.parsePayload(zPayload('B\tBrill\t0\t0\t\t\t')).hero.hearth, { bind: 'Brill', readyAt: 0, has: 0, pos: null });
   assert.equal(F.parsePayload(zPayload('T\t1\t1\t1\tx\tbad token')).hero.flightChunks[0].nodes.length, 0);
+  assert.equal(F.parsePayload(zPayload('T\t1\t1\t1\tforMap~fields=name+nodeID;api=NumTaxiNodes')).hero.flightChunks[0].src, 'forMap~fields=name+nodeID;api=NumTaxiNodes');
 });
 
 test('flight points are kept as a set, replaced by a newer one, and the hearthstone is stored with its ready time in ms', () => {

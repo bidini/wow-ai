@@ -140,7 +140,7 @@ function parsePayload(text) {
           if (name) nodes.push({ id: Number(m[1]), state: Number(m[2]), known: m[2] === '0' || m[2] === '1', map: Number(m[3]), x: Number(m[4]) / 10, y: Number(m[5]) / 10, name });
         }
         out.hero = out.hero || {};
-        (out.hero.flightChunks = out.hero.flightChunks || []).push({ gen, i, n, src: clean(f[4], 10), nodes });
+        (out.hero.flightChunks = out.hero.flightChunks || []).push({ gen, i, n, src: clean(f[4], 160), nodes });
         break;
       }
       case 'B': {

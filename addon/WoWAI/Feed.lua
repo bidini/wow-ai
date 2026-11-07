@@ -476,12 +476,47 @@ end
 -- to from the flight master they stand at.
 -- src says which call answered ("forMap", "all") or "none" when the client has neither; nil when the continent is not known.
 -- The nodes of both factions are listed, discovered or not, and told apart by state.
+-- While a flight master's window is open the client says which nodes can be flown to: through GetAllTaxiNodes (state per node
+-- number) or the old calls (a type per slot, matched by name). What it said is kept, so the nodes found stay known after the window closes.
+local TAXI_TYPE_STATE = { CURRENT = 0, REACHABLE = 1, DISTANT = 1, NONE = 2 }
+local function CaptureTaxi()
+	local here = Try(C_Map and C_Map.GetBestMapForUnit, "player")
+	local cont = type(here) == "number" and ContinentMap(here) or nil
+	F.taxiById, F.taxiByName = F.taxiById or {}, F.taxiByName or {}
+	if cont and type(C_TaxiMap) == "table" and type(C_TaxiMap.GetAllTaxiNodes) == "function" then
+		local list = Try(C_TaxiMap.GetAllTaxiNodes, cont)
+		if type(list) == "table" then
+			for _, n in ipairs(list) do
+				if type(n) == "table" and type(n.nodeID) == "number" and (n.state == 0 or n.state == 1 or n.state == 2) then F.taxiById[n.nodeID] = n.state end
+			end
+		end
+	end
+	local count = Try(NumTaxiNodes)
+	if type(count) == "number" and type(TaxiNodeGetType) == "function" and type(TaxiNodeName) == "function" then
+		for i = 1, math.min(count, 200) do
+			local name, kind = Try(TaxiNodeName, i), Try(TaxiNodeGetType, i)
+			if type(name) == "string" and TAXI_TYPE_STATE[kind] then F.taxiByName[name] = TAXI_TYPE_STATE[kind] end
+		end
+	end
+end
+
+-- Which fields the first node has and which taxi calls exist, as a short note for the bridge (so a missing state can be seen).
+local function TaxiNote(list)
+	local fields, api = {}, {}
+	if type(list) == "table" and type(list[1]) == "table" then for k in pairs(list[1]) do fields[#fields + 1] = tostring(k) end end
+	table.sort(fields)
+	for _, name in ipairs({ "NumTaxiNodes", "TaxiNodeGetType", "TaxiNodeName", "TaxiNodePosition" }) do if type(_G[name]) == "function" then api[#api + 1] = name end end
+	if type(C_TaxiMap) == "table" then for k, v in pairs(C_TaxiMap) do if type(v) == "function" then api[#api + 1] = "C_TaxiMap." .. k end end end
+	table.sort(api)
+	return "fields=" .. table.concat(fields, "+") .. ";api=" .. table.concat(api, ",")
+end
+
 local function ReadFlightPoints()
 	local TM = C_TaxiMap
 	local src, get
 	if type(TM) == "table" and type(TM.GetTaxiNodesForMap) == "function" then src, get = "forMap", TM.GetTaxiNodesForMap
 	elseif type(TM) == "table" and type(TM.GetAllTaxiNodes) == "function" then src, get = "all", TM.GetAllTaxiNodes end
-	if not get then return { src = "none", nodes = {} } end
+	if not get then return { src = "none~" .. TaxiNote(nil), nodes = {} } end
 	local here = Try(C_Map and C_Map.GetBestMapForUnit, "player")
 	local cont = type(here) == "number" and ContinentMap(here) or nil
 	if not cont then return nil end
@@ -491,12 +526,12 @@ local function ReadFlightPoints()
 		for _, n in ipairs(list) do
 			local p = type(n) == "table" and n.position
 			if type(n.nodeID) == "number" and type(p) == "table" and type(p.x) == "number" and type(p.y) == "number" and #nodes < MAX_FLIGHT then
-				local s = (n.state == 0 or n.state == 1 or n.state == 2) and n.state or 9
+				local s = (n.state == 0 or n.state == 1 or n.state == 2) and n.state or (F.taxiById and F.taxiById[n.nodeID]) or (F.taxiByName and F.taxiByName[n.name]) or 9
 				nodes[#nodes + 1] = { id = n.nodeID, s = s, m = cont, x = Tenths(p.x), y = Tenths(p.y), name = Clean(n.name, 40) }
 			end
 		end
 	end
-	return { src = src, nodes = nodes }
+	return { src = src .. "~" .. TaxiNote(list), nodes = nodes }
 end
 
 -- The hearthstone as the "B" line: where it is bound, when it can be used again (epoch seconds, 0 = now), whether the
@@ -793,6 +828,7 @@ function M.OnEvent(event, a1, a2)
 		F.infoAt = F.infoAt or (GetTime() + INFO_DEBOUNCE)
 	elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "SKILL_LINES_CHANGED"
 		or event == "TAXIMAP_OPENED" or event == "BAG_UPDATE_COOLDOWN" or event == "HEARTHSTONE_BOUND" then
+		if event == "TAXIMAP_OPENED" then pcall(CaptureTaxi) end
 		F.infoAt = F.infoAt or (GetTime() + INFO_DEBOUNCE)
 	elseif event == "PLAYER_DEAD" then
 		F.dead = true
