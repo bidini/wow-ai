@@ -471,9 +471,10 @@ local function ContinentMap(mapID)
 	end
 end
 
--- The flight points of the continent the player is on: { src, nodes = { { id, s (state), m, x, y, name } } }; s is 0 current,
--- 1 reachable, 2 unreachable, 9 when the client gives none. Reachable and current nodes are the ones the player has discovered and can fly
--- to from the flight master they stand at.
+-- The flight points of the continent the player is on: { src, nodes = { { id, s (state), f (faction), m, x, y, name } } }; s is 0 current,
+-- 1 reachable, 2 unreachable, 3 distant (the last three from the flight master window), 4 discovered / 5 undiscovered (the client's
+-- own isUndiscovered flag, when the node list has it), 9 when the client says nothing; only 0, 1 and 4 are nodes the player has found.
+-- f is 0 neutral, 1 Horde, 2 Alliance, 9 unknown.
 -- src says which call answered ("forMap", "all") or "none" when the client has neither; nil when the continent is not known.
 -- The nodes of both factions are listed, discovered or not, and told apart by state.
 -- While a flight master's window is open the client says which nodes can be flown to: through GetAllTaxiNodes (state per node
@@ -532,7 +533,9 @@ local function ReadFlightPoints()
 			local p = type(n) == "table" and n.position
 			if type(n.nodeID) == "number" and type(p) == "table" and type(p.x) == "number" and type(p.y) == "number" and #nodes < MAX_FLIGHT then
 				local s = (n.state == 0 or n.state == 1 or n.state == 2) and n.state or (F.taxiById and F.taxiById[n.nodeID]) or (F.taxiByPos and F.taxiByPos[Tenths(p.x) .. ":" .. Tenths(p.y)]) or (F.taxiByName and F.taxiByName[n.name]) or 9
-				nodes[#nodes + 1] = { id = n.nodeID, s = s, m = cont, x = Tenths(p.x), y = Tenths(p.y), name = Clean(n.name, 40) }
+				if type(n.isUndiscovered) == "boolean" and s ~= 0 then s = n.isUndiscovered and 5 or 4 end   -- the client's own word beats a guess from the window
+				local fac = (n.faction == 0 or n.faction == 1 or n.faction == 2) and n.faction or 9
+				nodes[#nodes + 1] = { id = n.nodeID, s = s, f = fac, m = cont, x = Tenths(p.x), y = Tenths(p.y), name = Clean(n.name, 40) }
 			end
 		end
 	end
@@ -614,7 +617,7 @@ local function CheckInfo()
 	local fp = ReadFlightPoints()
 	if fp then
 		local toks = {}
-		for _, n in ipairs(fp.nodes) do toks[#toks + 1] = n.id .. ":" .. n.s .. ":" .. n.m .. ":" .. n.x .. ":" .. n.y .. ":" .. n.name end
+		for _, n in ipairs(fp.nodes) do toks[#toks + 1] = n.id .. ":" .. n.s .. ":" .. n.f .. ":" .. n.m .. ":" .. n.x .. ":" .. n.y .. ":" .. n.name end
 		local sig = fp.src .. "|" .. table.concat(toks, "\t")
 		if sent.T ~= sig then
 			sent.T = sig

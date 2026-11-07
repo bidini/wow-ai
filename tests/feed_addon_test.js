@@ -940,8 +940,8 @@ function flightPoints(batches) {
   const nodes = [];
   for (const c of chunks.sort((a, b) => Number(a[2]) - Number(b[2]))) {
     for (const tok of c.slice(5)) {
-      const m = /^(\d+):(\d):(\d+):(\d+):(\d+):(.*)$/.exec(tok);
-      nodes.push({ id: +m[1], state: +m[2], map: +m[3], x: +m[4] / 10, y: +m[5] / 10, name: m[6] });
+      const m = /^(\d+):(\d):(\d):(\d+):(\d+):(\d+):(.*)$/.exec(tok);
+      nodes.push({ id: +m[1], state: +m[2], faction: +m[3], map: +m[4], x: +m[5] / 10, y: +m[6] / 10, name: m[7] });
     }
   }
   return { src: chunks[0][4].split('~')[0], note: chunks[0][4].split('~')[1] || '', nodes };
@@ -1077,4 +1077,19 @@ test('flight points: a distant node is not a found one, and same-named nodes are
   collect(vm, 70);
   vm.run('STUB.FireEvent("TAXIMAP_OPENED")');
   assert.deepEqual(flightPoints(collect(vm, 40)).nodes.map(n => [n.id, n.state]), [[18, 1], [19, 3], [11, 0], [10, 2]], 'reachable 1, distant 3, none 2; the two Booty Bays are not confused');
+});
+
+test('flight points: the client says which nodes are undiscovered and which faction they are for, and that is used when it is there', () => {
+  const vm = flightVM(`
+    STUB.taxi = {
+      { nodeID = 10, name = "The Sepulcher, Silverpine Forest", position = { x = 0.4110, y = 0.2980 }, isUndiscovered = false, faction = 1 },
+      { nodeID = 11, name = "Undercity, Tirisfal", position = { x = 0.4471, y = 0.2557 }, isUndiscovered = false, faction = 1, state = 0 },
+      { nodeID = 13, name = "Tarren Mill, Hillsbrad", position = { x = 0.4790, y = 0.3180 }, isUndiscovered = true, faction = 1 },
+      { nodeID = 6, name = "Ironforge, Dun Morogh", position = { x = 0.4870, y = 0.5240 }, isUndiscovered = true, faction = 2 },
+      { nodeID = 19, name = "Booty Bay, Stranglethorn", position = { x = 0.4411, y = 0.9352 }, isUndiscovered = false, faction = 0 },
+      { nodeID = 99, name = "Somewhere", position = { x = 0.5, y = 0.5 } },
+    }`);
+  const fp = flightPoints(collect(vm, 70));
+  assert.deepEqual(fp.nodes.map(n => [n.id, n.state, n.faction]), [[10, 4, 1], [11, 0, 1], [13, 5, 1], [6, 5, 2], [19, 4, 0], [99, 9, 9]],
+    'discovered 4, undiscovered 5 (a current node stays 0), faction 0 neutral / 1 Horde / 2 Alliance / 9 unknown');
 });
