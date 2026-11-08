@@ -153,10 +153,12 @@ function M.Refresh()
 	for i = math.max(1, cur - 1), #steps do
 		local s = steps[i]
 		local travel = TRAVEL[s.k]
-		local color = state.done[i] and "ff808080" or (i == cur and "ffffd100" or (travel and "ff4fd1ff" or "ffffffff"))
-		lines[#lines + 1] = { text = string.format("%s|c%s%d. %s|r", i == cur and "> " or "   ", color, i, s.t), step = i }
+		local optional = type(s.o) == "string" and s.o ~= ""
+		local color = state.done[i] and "ff808080" or (i == cur and "ffffd100" or (optional and "ffe0a050" or (travel and "ff4fd1ff" or "ffffffff")))
+		lines[#lines + 1] = { text = string.format("%s|c%s%d. %s%s|r", i == cur and "> " or "   ", color, i, optional and "[optional] " or "", s.t), step = i }
 		if i == cur then
 			lines[#lines + 1] = { text = string.format("      |cff9aa0a6%s  |  %s|r", s.z or "", s.w or ""), step = i }
+			if optional then lines[#lines + 1] = { text = string.format("      |cffe0a050optional: %s. Right-click to skip.|r", s.o), step = i } end
 		end
 		if #lines >= LIST_ROWS then break end
 	end

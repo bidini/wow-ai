@@ -310,3 +310,16 @@ test('travel steps without a position raise no error and show no arrow', () => {
   vm.load('WoWAIRoute.UpdateArrow()');
   assert.equal(vm.evaluate('WoWAIRouteArrow == nil or not WoWAIRouteArrow:IsShown()'), 'true');
 });
+
+test('an optional step is flagged [optional] in its own colour, with the reason under it when current, and it can be skipped', () => {
+  const vm = routeVM(STEPS, '');
+  vm.load(`WoWAIRouteData.steps[2].o = "quest level 22, you are 18: dangerous"; WoWAIRoute.Reload()`);
+  const r = rows(vm);
+  assert.match(r.join('\n'), /2\. \[optional\] Kill 8: Rot Hide Brute/, 'a later step is flagged');
+  const raw = vm.evaluate('WoWAIRouteList.rows[3].text');
+  assert.match(raw, /e0a050.*\[optional\]/, 'in the optional colour');
+  vm.load('WoWAIRoute.Command("skip")'); // step 1 is done by the skip; the optional step 2 is now current
+  const r2 = rows(vm);
+  assert.match(r2.join('\n'), /> 2\. \[optional\] Kill 8/, 'current');
+  assert.match(r2.join('\n'), /optional: quest level 22, you are 18: dangerous\. Right-click to skip/, 'with the reason and the hint');
+});
