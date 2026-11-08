@@ -40,7 +40,7 @@ Everything below follows from those three facts.
 [0xC7 0x1A] [id hi, lo] [len hi, lo] [payload…] [Fletcher-16 s1, s2]
 ```
 
-Each cell is a 4×4-pixel square drawn with `SetColorTexture`, each channel on or off (8 colors; a lit channel is drawn at 70% so the strip is easier on the eyes). On or off survives any gamma/contrast setting, unlike intermediate levels (a first version used 4 levels per channel and misread under some display settings). The Mac and Linux decoders measure the lit level from the strip's first, always yellow, cell and put the threshold halfway; the Windows one uses a fixed 90. 200 cells per row, up to 48 rows, anchored at the top-left of `UIParent` with the frame scaled to `768 / physicalScreenHeight` so one UI unit is exactly one pixel. Capacity ≈ 3.2 KB per frame.
+Each cell is a 4×4-pixel square drawn with `SetColorTexture`, each channel on or off (8 colors; a lit channel is drawn at 45% so the strip is easier on the eyes). On or off survives any gamma/contrast setting, unlike intermediate levels (a first version used 4 levels per channel and misread under some display settings). The Mac and Linux decoders measure the lit level from the strip's first, always yellow, cell and put the threshold halfway; the Windows one uses a fixed 90. 200 cells per row, up to 48 rows, anchored at the top-left of `UIParent` with the frame scaled to `768 / physicalScreenHeight` so one UI unit is exactly one pixel. Capacity ≈ 3.2 KB per frame.
 
 The payload is one or more records separated by `\x1E`, fields by `\x1F`:
 
