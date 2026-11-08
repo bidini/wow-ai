@@ -64,19 +64,35 @@ def emit(obj):
 PITCH_MIN, PITCH_MAX, PITCH_STEP = 2.0, 10.0, 0.005
 PITCH_STEP_Y = 0.01
 HEADER_BYTES = 6
-# A lit channel is drawn at 70% (about 178); anything from 90 up counts as lit, an unlit one is 0.
-ON_MIN = 90
+# A lit channel is whatever level the addon draws it at and an unlit one is 0, so the threshold is measured from the strip itself: the first cell
+# is always yellow (red and green lit, blue not) and the threshold goes halfway between its lit and unlit levels. THRESH holds the last
+# measurement; the default suits a lit level of about 180. BOOT is the least a lit channel may show for a pixel to count as a strip candidate.
+THRESH = 90
+BOOT = 40
+
+
+def calibrate(rgb):
+    global THRESH
+    lit = (rgb[0] + rgb[1]) / 2
+    if lit >= BOOT and rgb[2] < 0.5 * lit:
+        THRESH = max(25, min(150, (lit + rgb[2]) / 2))
+
+
+def calibrate_at(px, width, height, x, y):
+    """Calibrate from the mean of a 2 x 2 block of pixels in the first (yellow) cell: averaging beats noise."""
+    pix = [px(min(width - 1, x + dx), min(height - 1, y + dy)) for dx in (0, 1) for dy in (0, 1)]
+    calibrate(tuple(sum(p[k] for p in pix) / len(pix) for k in range(3)))
 
 
 def cell_at(px, width, height, x, y):
     xi = min(max(int(x), 0), width - 1)
     yi = min(max(int(y), 0), height - 1)
     rr, gg, bb = px(xi, yi)
-    return (4 if rr >= ON_MIN else 0) + (2 if gg >= ON_MIN else 0) + (1 if bb >= ON_MIN else 0)
+    return (4 if rr >= THRESH else 0) + (2 if gg >= THRESH else 0) + (1 if bb >= THRESH else 0)
 
 
 def is_yellow(rgb):
-    return rgb[0] >= ON_MIN and rgb[1] >= ON_MIN and rgb[2] < ON_MIN
+    return rgb[0] >= BOOT and rgb[1] >= BOOT and rgb[2] < 0.5 * min(rgb[0], rgb[1])
 
 
 def has_magic(px, width, height, ox, oy, pw):
@@ -230,6 +246,7 @@ def find_and_decode(px, width, height, hint):
     because the macOS title bar pushes the UIParent top-left down. ph is None until a strip of two rows
     or more has shown the row height (a single row never needs it)."""
     if hint:
+        calibrate_at(px, width, height, int(hint[0] + 0.5 * hint[2]), int(hint[1] + 1))
         msg = decode(px, width, height, hint[0], hint[1], hint[2], hint[3] or 2.0)
         if msg and not msg.get("error"):
             return msg, hint
@@ -245,6 +262,7 @@ def find_and_decode(px, width, height, hint):
                 continue
             if oy > 0 and is_yellow(px(ox + 1, oy - 1)):  # the strip's top row, not one below it
                 continue
+            calibrate_at(px, width, height, ox + 1, oy + 1)
             pitches = [PITCH_MIN + i * PITCH_STEP for i in range(steps)
                        if has_magic(px, width, height, ox, oy, PITCH_MIN + i * PITCH_STEP)]
             if not pitches:
