@@ -64,17 +64,19 @@ def emit(obj):
 PITCH_MIN, PITCH_MAX, PITCH_STEP = 2.0, 10.0, 0.005
 PITCH_STEP_Y = 0.01
 HEADER_BYTES = 6
+# A lit channel is drawn at 70% (about 178); anything from 90 up counts as lit, an unlit one is 0.
+ON_MIN = 90
 
 
 def cell_at(px, width, height, x, y):
     xi = min(max(int(x), 0), width - 1)
     yi = min(max(int(y), 0), height - 1)
     rr, gg, bb = px(xi, yi)
-    return (4 if rr >= 128 else 0) + (2 if gg >= 128 else 0) + (1 if bb >= 128 else 0)
+    return (4 if rr >= ON_MIN else 0) + (2 if gg >= ON_MIN else 0) + (1 if bb >= ON_MIN else 0)
 
 
 def is_yellow(rgb):
-    return rgb[0] >= 128 and rgb[1] >= 128 and rgb[2] < 128
+    return rgb[0] >= ON_MIN and rgb[1] >= ON_MIN and rgb[2] < ON_MIN
 
 
 def has_magic(px, width, height, ox, oy, pw):

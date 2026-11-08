@@ -8,7 +8,8 @@ local M = {}
 WoWAIRoute = M
 
 local LIST_ROWS = 12
-local LIST_WIDTH = 360
+local LIST_WIDTH = 470
+local ROW_H = 19 -- row height for the larger font
 local MARGIN_MAC = 96 -- the Dock covers the left edge of a Mac screen (the same margin as the pixel strip)
 local localDB = { skips = {} }
 local list, data
@@ -90,7 +91,7 @@ end
 
 local function BuildList()
 	list = CreateFrame("Frame", "WoWAIRouteList", UIParent, "BackdropTemplate")
-	list:SetSize(LIST_WIDTH, 26 + LIST_ROWS * 14)
+	list:SetSize(LIST_WIDTH, 30 + LIST_ROWS * ROW_H)
 	list:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
 	list:SetBackdropColor(0, 0, 0, 0.6)
 	local p = DB().pos
@@ -105,15 +106,15 @@ local function BuildList()
 		local point, _, _, x, y = self:GetPoint()
 		DB().pos = { point, x, y }
 	end)
-	list.title = list:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	list.title = list:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	list.title:SetPoint("TOPLEFT", 10, -8)
 	list.title:SetJustifyH("LEFT")
 	list.rows = {}
 	for r = 1, LIST_ROWS do
 		local row = CreateFrame("Button", nil, list)
-		row:SetSize(LIST_WIDTH - 20, 14)
-		row:SetPoint("TOPLEFT", 10, -10 - r * 14)
-		row.fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		row:SetSize(LIST_WIDTH - 20, ROW_H)
+		row:SetPoint("TOPLEFT", 10, -14 - r * ROW_H)
+		row.fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 		row.fs:SetPoint("LEFT")
 		row.fs:SetWidth(LIST_WIDTH - 20)
 		row.fs:SetJustifyH("LEFT")
