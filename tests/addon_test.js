@@ -47,7 +47,7 @@ function decodeStrip(vm) {
     for _, t in ipairs(WoWAIStrip.textures) do
       if t.shown and t.color then
         local c, r = math.floor(t.x / 4), math.floor(-t.y / 4)
-        local v = (t.color[1] >= 0.5 and 4 or 0) + (t.color[2] >= 0.5 and 2 or 0) + (t.color[3] >= 0.5 and 1 or 0)
+        local v = (t.color[1] >= 0.2 and 4 or 0) + (t.color[2] >= 0.2 and 2 or 0) + (t.color[3] >= 0.2 and 1 or 0)
         parts[#parts + 1] = (r * ${CELLS_PER_ROW} + c) .. ":" .. v
       end
     end
