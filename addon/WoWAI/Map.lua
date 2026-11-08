@@ -128,7 +128,7 @@ local function PlayerOnContinent()
 end
 
 -- Yards and bearing (radians, counter-clockwise from north) from the player to a point (map id, x and y in map percent), or nil and the
--- reason as text. Used by the route arrow (Route.lua).
+-- reason as text. (The route arrow that used it is gone.)
 function M.Heading(m, x, y)
 	local cont, px, py = PlayerOnContinent()
 	if not cont then return nil, "no position here" end

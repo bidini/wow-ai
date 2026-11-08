@@ -13,6 +13,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Removed
 
+- The route arrow (`/wow-ai route arrow`). The step list and the map markers stay.
 - The navigator arrow (and `/wow-ai map nav`, `next`, `prev`, `stop`, and clicking a pin to navigate). Map pins and lines stay.
 
 ### Fixed
