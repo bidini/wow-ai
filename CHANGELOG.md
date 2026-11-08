@@ -6,6 +6,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Added
 
+- `ask.enabled: false` in `bridge/config.json` turns the question-answering agent off (the feed, map and route list keep working).
 - Route list: optional steps (a flight-point or inn detour, a dungeon quest picked up for later, a quest four or more levels above you) are marked `[optional]` in their own colour, with the reason under the step when it is current; right-click to skip.
 - The route on the world map: the current step and the next ones as numbered diamonds (violet for quest steps, cyan for travel) joined by a line, apart from the round pins of the layers and the game's quest icons. Steps at one place share a marker. `/wow-ai route map on|off`. Markers keep clear of each other, of the layers' pins and of the game's own icons at the real spot (a thin line joins each to its spot), and the numbers are bold.
 - Route list: a flight, a hearthstone use, a zeppelin ride, finding a flight point and setting the hearthstone are steps of their own, in their own colour. They are ticked automatically once a later quest step is done (or by hand).

@@ -103,6 +103,9 @@ function siblingFolders() {
 
 const SLOTS = cfg.slots || 200;
 const MAX_PARALLEL = cfg.maxParallel || 3;
+// "ask": { "enabled": false } turns the question-answering agent off: nothing the player types (/ai, chat windows) starts an agent run. The
+// feed, the map and the other pieces keep working, and so do the reminders if they are on.
+const ASK_ON = !(cfg.ask && cfg.ask.enabled === false);
 const cap = Object.assign({ enabled: true, processName: 'WowB', cellPx: 4, cellsPerRow: 200, maxRows: 48, intervalMs: 250 }, cfg.capture || {});
 // The game-side files. A config.json written for the addon's old name
 // (WoWClaude) still works: the paths are derived from addonDir instead.
@@ -542,6 +545,11 @@ function runJob(job) {
     resetBeats(job.id);
     signal('ack', job.id, true);
   }
+  if (!ASK_ON && !job.reminder) {
+    log(`${tag} the agent is off (ask.enabled is false in config.json)`);
+    finish(job, 'error', 'The agent is off (ask.enabled is false in bridge/config.json). The feed and the route list still work.');
+    return;
+  }
   if (!fs.existsSync(cwd)) {
     log(`${tag} cwd does not exist: ${cwd}`);
     const sibs = siblingFolders();
@@ -908,6 +916,7 @@ function banner() {
   console.log(`  addon    : ${addonInstalled() ? 'installed' : 'NOT INSTALLED - run: node setup.js, then restart WoW'}`);
   console.log(`  slots    : ${slotsInstalled() ? SLOTS + ' installed' : 'NOT INSTALLED - run: node setup.js (or node bridge/install-slots.js), then restart WoW'}`);
   console.log(`  capture  : ${cap.enabled ? 'on (' + cap.processName + ', ' + cap.cellsPerRow + 'x' + cap.maxRows + ' cells of ' + cap.cellPx + 'px)' : 'off'}`);
+  console.log(`  agent    : ${ASK_ON ? 'on (questions from the game start a run)' : 'OFF (ask.enabled is false in config.json)'}`);
   console.log(`  parallel : up to ${MAX_PARALLEL} chats at once`);
   console.log(`  fallback : ${SAVED_VARS}`);
   console.log(`  agent    : ${DEFAULT_AGENT} (default; chats pick their own with /wow-ai agent)`);
