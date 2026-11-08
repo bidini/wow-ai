@@ -4,6 +4,10 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- The feed no longer waits for the bridge's presence beats before drawing a batch on the strip. Those beats (a sound-file check) can go quiet while the bridge is fine, and the feed then stalled until a /reload (seen twice on Nov 8, after entering instances). A batch is drawn once the bridge has been heard from in the session.
+
 ### Changed
 
 - The pixel strip is dimmer still: a lit channel is drawn at 45%. Restart the bridge first (new decoder), then reload the game. Not translucent: a see-through strip would pick up the scene behind it and be misread.

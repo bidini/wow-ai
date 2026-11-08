@@ -806,7 +806,10 @@ function M.Tick()
 		if due and (#F.pending > 0 or #F.samples > 0 or #F.atlasQueue > 0 or next(F.infoPending) or #F.spellQueue > 0 or #F.doneQueue > 0 or #F.flightQueue > 0) then Build() end
 	end
 	o = F.out
-	if o and not o.showing and o.shows < Shows() and now >= o.nextAt and WoWAI.IsConnected() then
+	-- The strip is drawn whenever the bridge has been heard from this session, even if its presence beats have gone quiet: those beats (a sound-file
+	-- check) can stop working without the bridge being gone, and a feed that waits for them stalls until a /reload (seen twice on Nov 8, after
+	-- entering instances). A bridge that is really off just does not read the strip; the batch is dropped when stale.
+	if o and not o.showing and o.shows < Shows() and now >= o.nextAt and (WoWAI.IsConnected() or WoWAI.BridgeState() ~= "unknown") then
 		o.showing = true
 		o.hideAt = now + Hold()
 		WoWAI.RefreshStrip()
