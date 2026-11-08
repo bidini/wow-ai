@@ -1113,3 +1113,19 @@ test('atlas: the other continents of the world are sent too, so quests there can
   assert.ok(ws.includes('W\t1431\t100\t3000\t3500\t7000\t7500\tDuskwood'), 'the continent you are on is still sent');
   assert.equal(vm.num('WoWAIFeed.Status().errors'), 0);
 });
+
+test('a batch still goes on the strip when the bridge looks gone (the presence beats stopped), so the feed never waits for a /reload', () => {
+  const vm = ready();
+  vm.run('WoWAI.IsConnected = function() return false end; WoWAI.BridgeState = function() return "down", 0.9, 0.25, 0.25, "down" end');
+  vm.run('STUB.FireEvent("PLAYER_LEVEL_UP", 24)');
+  const b = nextBatch(vm, 40);
+  assert.ok(b, 'a batch is on the strip although the bridge looks gone');
+});
+
+test('before the bridge has been heard from at all, nothing is drawn', () => {
+  const vm = newVM();
+  login(vm);
+  vm.run('STUB.FireEvent("PLAYER_ENTERING_WORLD", true, false)');
+  vm.run('WoWAI.IsConnected = function() return false end; WoWAI.BridgeState = function() return "unknown", 0.6, 0.6, 0.6, "unknown" end');
+  assert.equal(nextBatch(vm, 20), null);
+});
