@@ -48,3 +48,7 @@ Twelve lines at most, starting from the step before the current one. Drag the fr
 The current step and the next ones (up to 14 with a position) are drawn on the world map as numbered diamonds joined by a thin line: violet for quest steps (accept, kill, collect, turn in), cyan for travel (flight, zeppelin, flight point, inn). The current step is larger. They are square and numbered, unlike the round game icons and the round pins the agent's layers use. Steps at one place share a marker; hover shows the steps there. Steps with no position (using the hearthstone) are left out. `/wow-ai route map off` hides them, `on` shows them.
 
 Markers never overlap: each one is moved to the nearest free place around its real spot (at least 20 pixels away, because the game draws its own quest icon there), clear of the other markers and of the agent's round pins, and a thin white line joins it to the spot. The numbers use a bold, outlined font.
+
+## Optional steps
+
+The planner marks a step optional (`o` in `RouteData.lua`) when it is a detour to find a flight point or set the hearthstone, a dungeon quest picked up for a later group, or a quest four or more levels above the player (dangerous). The list shows `[optional]` before it in amber; when it is the current step the reason is under it. Skipping one (right-click) costs nothing: later steps do not depend on it unless the quests are linked.
