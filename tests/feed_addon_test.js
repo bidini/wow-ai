@@ -1129,3 +1129,15 @@ test('before the bridge has been heard from at all, nothing is drawn', () => {
   vm.run('WoWAI.IsConnected = function() return false end; WoWAI.BridgeState = function() return "unknown", 0.6, 0.6, 0.6, "unknown" end');
   assert.equal(nextBatch(vm, 20), null);
 });
+
+test('inside an instance (no map and no position) the feed keeps building and showing batches without errors', () => {
+  const vm = ready();
+  vm.run('C_Map.GetBestMapForUnit = function() return nil end; C_Map.GetPlayerMapPosition = function() return nil end');
+  vm.run('STUB.FireEvent("ZONE_CHANGED_NEW_AREA"); STUB.FireEvent("PLAYER_LEVEL_UP", 24)');
+  const b = nextBatch(vm, 40);
+  assert.ok(b, 'a batch is on the strip with no coordinates');
+  advance(vm, 120);
+  vm.run('STUB.FireEvent("PLAYER_LEVEL_UP", 25)');
+  assert.ok(nextBatch(vm, 40), 'and again later');
+  assert.equal(vm.evaluate('WoWAIFeed.Status().errors'), '0', vm.evaluate('tostring(WoWAIFeed.Status().lastError)'));
+});
