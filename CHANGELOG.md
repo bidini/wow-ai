@@ -4,6 +4,11 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Changed
+
+- The route list uses a larger font (taller rows, wider frame).
+- The pixel strip is dimmer: a lit channel is drawn at 70% instead of full, and the decoders (`capture_mac.py`, `capture_x11.py`, `capture.ps1`) read a channel as lit from 90 up instead of 128. Restart the bridge and reload. The decoder's tolerance to noise and to a darkening gamma setting is smaller (about 90 levels of noise instead of 127).
+
 ### Added
 
 - `ask.enabled: false` in `bridge/config.json` turns the question-answering agent off (the feed, map and route list keep working).

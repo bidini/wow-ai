@@ -37,9 +37,9 @@ function Emit($obj) {
 function CellValue($bmp, [int]$c, [int]$r) {
   $px = $bmp.GetPixel($c * $Cell + [int]($Cell / 2), $r * $Cell + [int]($Cell / 2))
   $v = 0
-  if ($px.R -ge 128) { $v += 4 }
-  if ($px.G -ge 128) { $v += 2 }
-  if ($px.B -ge 128) { $v += 1 }
+  if ($px.R -ge 90) { $v += 4 }
+  if ($px.G -ge 90) { $v += 2 }
+  if ($px.B -ge 90) { $v += 1 }
   return $v
 }
 

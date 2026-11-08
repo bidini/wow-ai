@@ -54,7 +54,7 @@ function render(cells, { pw, ph, ox, oy, hide = 0, cover = null, width = 1100, h
   const rows = Math.ceil(cells.length / CELLS);
   const cellRgb = i => {
     const v = i < cells.length ? cells[i] : 0;
-    return [Math.floor(v / 4) % 2, Math.floor(v / 2) % 2, v % 2].map(l => l * 255);
+    return [Math.floor(v / 4) % 2, Math.floor(v / 2) % 2, v % 2].map(l => l * 178);
   };
   const under = (pos, origin, pitch, n) => {      // [index, weight] of the cells under the pixel [pos, pos + 1)
     const a = (pos - origin) / pitch, b = (pos + 1 - origin) / pitch, out = [];

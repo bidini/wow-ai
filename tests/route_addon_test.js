@@ -224,3 +224,10 @@ test('an optional step is flagged [optional] in its own colour, with the reason 
   assert.match(r2.join('\n'), /> 2\. \[optional\] Kill 8/, 'current');
   assert.match(r2.join('\n'), /optional: quest level 22, you are 18: dangerous\. Right-click to skip/, 'with the reason and the hint');
 });
+
+test('the route list uses the larger game font with taller rows', () => {
+  const src = fs.readFileSync(path.join(ADDON, 'Route.lua'), 'utf8');
+  assert.match(src, /row\.fs = row:CreateFontString\(nil, "OVERLAY", "GameFontHighlight"\)/);
+  assert.ok(!/GameFontHighlightSmall/.test(src), 'no small font left in the list');
+  assert.match(src, /local ROW_H = 19/);
+});

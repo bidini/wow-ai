@@ -32,6 +32,7 @@ local PRESENCE_MAX = 2000 -- presence/0001..2000.wav, one flipped by the bridge 
 local REMINDER_MAX = 400 -- reminder/0001..0400.wav, the next one is flipped by the bridge when a reminder tip is waiting (docs/REMINDER.md)
 local STRIP_TRIES = 3 -- re-show an unacknowledged message this many times before falling back
 local CELL, CELLS_PER_ROW, MAX_ROWS = 4, 200, 48
+local CELL_LEVEL = 0.7 -- brightness of a lit channel: dimmer than full so the strip is easier on the eyes; the decoders read a channel as lit from 90 up (ON_MIN)
 local STRIP_MARGIN_MAC = 96 -- UI units (about pixels) between the window's left edge and the strip on a Mac client
 local STRIP_SECONDS = 40 -- max per message; it leaves the strip as soon as the bridge acknowledges
 local POLL_SCHEDULE = { 5, 10, 16, 24, 34, 46, 60, 80, 100, 130, 160, 200, 240, 300 }
@@ -363,7 +364,7 @@ local function ShowStrip(id, payload)
 			cellPool[i] = t
 		end
 		local cr, cg, cb = Codec.CellColor(cells[i] or 0)
-		t:SetColorTexture(cr, cg, cb, 1)
+		t:SetColorTexture(cr * CELL_LEVEL, cg * CELL_LEVEL, cb * CELL_LEVEL, 1)
 		t:Show()
 	end
 	for i = total + 1, #cellPool do

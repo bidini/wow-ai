@@ -50,7 +50,7 @@ def emit(obj):
 
 def cell_value(px, c, r, ox=0, oy=0):
     rr, gg, bb = px(ox + c * CELL + CELL // 2, oy + r * CELL + CELL // 2)
-    return (4 if rr >= 128 else 0) + (2 if gg >= 128 else 0) + (1 if bb >= 128 else 0)
+    return (4 if rr >= 90 else 0) + (2 if gg >= 90 else 0) + (1 if bb >= 90 else 0)
 
 
 def has_magic(px, ox, oy):
