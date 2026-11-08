@@ -60,12 +60,12 @@ function png(width, height, rgb) {
 }
 
 // Pure-primary cells, random noise, and a gamma curve like the in-game sliders.
-function render(cells, jitter, gamma) {
+function render(cells, jitter, gamma, level = 178) {
   const W = CELLS * CELL, H = MAXROWS * CELL;
   const rgb = Buffer.alloc(W * H * 3, 0x30);
   cells.forEach((v, i) => {
     const c = i % CELLS, r = Math.floor(i / CELLS);
-    const lv = [Math.floor(v / 4) % 2, Math.floor(v / 2) % 2, v % 2].map(l => l * 178);
+    const lv = [Math.floor(v / 4) % 2, Math.floor(v / 2) % 2, v % 2].map(l => l * level);
     for (let y = 0; y < CELL; y++) for (let x = 0; x < CELL; x++) {
       const o = ((r * CELL + y) * W + (c * CELL + x)) * 3;
       for (let k = 0; k < 3; k++) {
@@ -93,21 +93,25 @@ const cases = [
   { id: 7, payload: 'sess1\x1Fchat1\x1F7\x1FC:\\Users\\me\\proj\x1F\x1Fname\x1Fhéllo wörld ✓ — "quotes" & \\backslash\\ end', jitter: 0, gamma: 1 },
   { id: 4242, payload: 'sess1\x1Fchat1\x1F4242\x1FC:\\x\x1Fn\x1F\x1F' + 'Refactor the player controller so jumping feels less floaty. '.repeat(40), jitter: 60, gamma: 0.6 },
   { id: 9, payload: 'sess1\x1Fchat1\x1F9\x1FC:\\x\x1F\x1F\x1F' + 'a fairly long paste: '.repeat(140), jitter: 40, gamma: 1.8 },
-  { id: 65000, payload: '\x1F\x1F\x1F\x1F\x1F\x1Fx', jitter: 85, gamma: 1 },
+  { id: 65000, payload: '\x1F\x1F\x1F\x1F\x1F\x1Fx', jitter: 60, gamma: 1 },
+  // The lit level is measured from the strip, so any brightness reads: dim, bright, and dim under a darkening gamma.
+  { id: 321, payload: 'sess1\x1Fchat1\x1F321\x1FC:\\x\x1Fn\x1F\x1F' + 'dim strip. '.repeat(30), jitter: 20, gamma: 1, level: 100 },
+  { id: 322, payload: 'sess1\x1Fchat1\x1F322\x1FC:\\x\x1Fn\x1F\x1F' + 'bright strip. '.repeat(30), jitter: 40, gamma: 1, level: 255 },
+  { id: 323, payload: 'sess1\x1Fchat1\x1F323\x1FC:\\x\x1Fn\x1F\x1F' + 'dim and dark. '.repeat(30), jitter: 10, gamma: 1.5, level: 130 },
   // Event-feed batches (docs/EVENTS.md): tabs, newlines, accents, and a typical and a full-size payload.
   { id: 12, payload: 'sess1\x1F\x1F12\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tForêt d\'Elwynn\tGoldshire\t0\t10\t100', 'Q\t176*\t33', 'E\t1700000001\tqaccept\t33\tLoups à la frontière', 'P\t1700000002\t1429\t421\t659'].join('\n'), jitter: 40, gamma: 1.3 },
-  { id: 13, payload: 'sess1\x1F\x1F13\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100'].concat(Array.from({ length: 40 }, (_, i) => 'E\t' + (1700000000 + i) + '\tqaccept\t' + i + '\tQuest number ' + i)).concat(Array.from({ length: 20 }, (_, i) => 'P\t' + (1700000100 + i) + '\t1429\t' + (400 + i) + '\t' + (600 + i))).join('\n'), jitter: 80, gamma: 0.8 },
+  { id: 13, payload: 'sess1\x1F\x1F13\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100'].concat(Array.from({ length: 40 }, (_, i) => 'E\t' + (1700000000 + i) + '\tqaccept\t' + i + '\tQuest number ' + i)).concat(Array.from({ length: 20 }, (_, i) => 'P\t' + (1700000100 + i) + '\t1429\t' + (400 + i) + '\t' + (600 + i))).join('\n'), jitter: 65, gamma: 0.8 },
   // A batch with the atlas lines of docs/DISTANCE.md (a continent size and 8 zone maps).
-  { id: 14, payload: 'sess1\x1F\x1F14\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100', 'K\t0\t40000\t30000'].concat(Array.from({ length: 8 }, (_, i) => 'W\t' + (1429 + i) + '\t0\t' + (3000 + i * 10) + '\t' + (3500 + i * 10) + '\t7000\t7500\tZone ' + i + ' Forêt')).join('\n'), jitter: 70, gamma: 1.2 },
+  { id: 14, payload: 'sess1\x1F\x1F14\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t7\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100', 'K\t0\t40000\t30000'].concat(Array.from({ length: 8 }, (_, i) => 'W\t' + (1429 + i) + '\t0\t' + (3000 + i * 10) + '\t' + (3500 + i * 10) + '\t7000\t7500\tZone ' + i + ' Forêt')).join('\n'), jitter: 45, gamma: 1.2 },
   // A login batch with the character lines (docs/EVENTS.md): race and class, gear, skills and two spell chunks.
-  { id: 15, payload: 'sess1\x1F\x1F15\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t12\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100\t123456', 'H\tNight Elf\tHunter\tAlliance', 'I\t1=1234\t2=2345\t3=3456\t5=4567\t6=5678\t7=6789\t8=7890\t10=8901\t16=9012', 'R\tBows=46/115\tSkinning=75/75\tFirst Aid=40/75\tSwords=10/115'].concat(Array.from({ length: 2 }, (_, c) => 'A\t1700000001\t' + (c + 1) + '\t6\t' + Array.from({ length: 12 }, (_, i) => 'Spell number ' + (c * 12 + i) + '=' + (i % 4 + 1)).join('\t'))).join('\n'), jitter: 70, gamma: 1.2 },
+  { id: 15, payload: 'sess1\x1F\x1F15\x1F\x1Fe\x1F\x1F' + ['v\t1', 'S\t1700000000\t12\t1429\t421\t659\t7.0\t7.0\tElwynn Forest\tGoldshire\t0\t10\t100\t123456', 'H\tNight Elf\tHunter\tAlliance', 'I\t1=1234\t2=2345\t3=3456\t5=4567\t6=5678\t7=6789\t8=7890\t10=8901\t16=9012', 'R\tBows=46/115\tSkinning=75/75\tFirst Aid=40/75\tSwords=10/115'].concat(Array.from({ length: 2 }, (_, c) => 'A\t1700000001\t' + (c + 1) + '\t6\t' + Array.from({ length: 12 }, (_, i) => 'Spell number ' + (c * 12 + i) + '=' + (i % 4 + 1)).join('\t'))).join('\n'), jitter: 45, gamma: 1.2 },
 ];
 
 let pass = 0, total = 0;
 for (const t of cases) {
   const cells = encodeWithLua(t.id, t.payload);
   const file = path.join(TMP, `strip_${t.id}.png`);
-  fs.writeFileSync(file, render(cells, t.jitter, t.gamma));
+  fs.writeFileSync(file, render(cells, t.jitter, t.gamma, t.level));
   for (const [name, res] of decode(file)) {
     total++;
     const ok = res.id === t.id && res.text === t.payload;

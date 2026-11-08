@@ -48,9 +48,24 @@ def emit(obj):
 # Decoder: identical rules to capture.ps1
 # ---------------------------------------------------------------------------
 
+# A lit channel is whatever level the addon draws it at and an unlit one is 0, so the threshold is measured from the strip itself: the first
+# cell is always yellow (red and green lit, blue not) and the threshold goes halfway between its lit and unlit levels. THRESH holds the last
+# measurement; the default suits a lit level of about 180.
+THRESH = 90
+
+
+def calibrate(px, ox, oy):
+    global THRESH
+    pix = [px(ox + dx, oy + dy) for dx in range(CELL) for dy in range(CELL)]   # the whole first cell: averaging beats noise
+    r, g, b = (sum(p[k] for p in pix) / len(pix) for k in range(3))
+    lit = (r + g) / 2
+    if lit >= 40 and b < 0.5 * lit:
+        THRESH = max(25, min(150, (lit + b) / 2))
+
+
 def cell_value(px, c, r, ox=0, oy=0):
     rr, gg, bb = px(ox + c * CELL + CELL // 2, oy + r * CELL + CELL // 2)
-    return (4 if rr >= 90 else 0) + (2 if gg >= 90 else 0) + (1 if bb >= 90 else 0)
+    return (4 if rr >= THRESH else 0) + (2 if gg >= THRESH else 0) + (1 if bb >= THRESH else 0)
 
 
 def has_magic(px, ox, oy):
@@ -104,6 +119,7 @@ def find_and_decode(px, width, height, hint):
     for ox, oy in cands:
         if ox + W > width or oy + H > height:
             continue
+        calibrate(px, ox, oy)
         if has_magic(px, ox, oy):
             return decode(px, ox, oy), (ox, oy)
     return None, hint

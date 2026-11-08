@@ -6,6 +6,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Changed
 
+- The Mac and Linux decoders measure how bright a lit channel is from the strip's first (yellow) cell and put the threshold halfway, so the strip can be dimmer or the game's brightness changed without breaking the feed. Only a bridge restart is needed (the addon is unchanged). The Windows decoder keeps a fixed threshold of 90.
 - The route list uses a larger font (taller rows, wider frame).
 - The pixel strip is dimmer: a lit channel is drawn at 70% instead of full, and the decoders (`capture_mac.py`, `capture_x11.py`, `capture.ps1`) read a channel as lit from 90 up instead of 128. Restart the bridge and reload. The decoder's tolerance to noise and to a darkening gamma setting is smaller (about 90 levels of noise instead of 127).
 
